@@ -19,7 +19,7 @@
 ### Установка
 
 Установщик лежит в [последнем релизе](https://github.com/vldmr-vslv/hyperloom-community/releases/latest):
-файл `Hyperloom Community Setup <версия>.exe`.
+файл `Hyperloom.Community.Setup.<версия>.exe`.
 
 Установщик не подписан, поэтому Windows покажет окно SmartScreen "Система Windows защитила ваш
 компьютер". Нажмите "Подробнее", затем "Выполнить в любом случае".
@@ -55,7 +55,7 @@ folders, files, a terminal and notes.
 ### Install
 
 The installer is in the [latest release](https://github.com/vldmr-vslv/hyperloom-community/releases/latest):
-`Hyperloom Community Setup <version>.exe`.
+`Hyperloom.Community.Setup.<version>.exe`.
 
 The installer is not signed, so Windows shows a SmartScreen window "Windows protected your PC".
 Click "More info", then "Run anyway".
