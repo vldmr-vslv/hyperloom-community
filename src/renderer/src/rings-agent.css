@@ -1,0 +1,252 @@
+
+.card__bar--atlas .card__title {
+  flex: 0 1 auto;
+}
+
+
+
+/* ---------- шапка плиты, как вид 11 прототипа ---------- */
+
+.card__bar--atlas .card__lead,
+.card__bar--atlas > .icon {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  object-fit: contain;
+  color: #cfcfcc;
+}
+
+.card__bar--atlas .card__title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.card__gap {
+  flex: 1;
+}
+
+
+/* Вкладки html-файла: код, страница в карточке, браузер Windows. */
+.card__tabs {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+
+.card__tabs button {
+  all: unset;
+  height: 13px;
+  padding: 0 6px;
+  border-radius: 3px;
+  background: #141413;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.2);
+  color: #9a9a97;
+  font: 600 7.5px/13px var(--font-mono);
+  letter-spacing: 0.12em;
+  cursor: pointer;
+}
+
+.card__tabs button.on {
+  background: color-mix(in srgb, var(--pc) 25%, transparent);
+  box-shadow: inset 0 0 0 1px var(--pc);
+  color: #f3f3f1;
+}
+
+/* Когда файл менялся и "открыт вне". */
+.card__ago {
+  flex: none;
+  font: 600 7.5px var(--font-mono);
+  letter-spacing: 0.16em;
+  color: #8a8a88;
+  white-space: nowrap;
+}
+
+.card__ago--out {
+  color: #e8ecf4;
+}
+
+/* Значок файла тянется наружу: в мессенджер, в папку. */
+.card__grab {
+  display: inline-flex;
+  flex: none;
+  cursor: grab;
+}
+
+/* Бургер агента и круглый красный крестик. */
+.card__bar--atlas .card__menu {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #cfcfcc;
+}
+
+.card__bar--atlas .card__menu[aria-expanded="true"],
+.card__bar--atlas .card__menu:hover {
+  background: rgb(255 255 255 / 0.12);
+}
+
+.card__bar--atlas .card__menu .icon {
+  width: 13px;
+  height: 13px;
+}
+
+.card__bar--atlas .card__close {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  /* Общий стиль кнопок шапки (index.css) тянет ширину до --target-min: круг становился овалом 24x16. */
+  min-width: 0;
+  height: 16px;
+  margin: 0 3px 0 2px;
+  padding: 0;
+  border: 1px solid rgb(245 91 91 / 0.45);
+  border-radius: 50%;
+  background: #141413;
+  color: #f08b8b;
+}
+
+.card__bar--atlas .card__close .icon {
+  width: 8px;
+  height: 8px;
+}
+
+.card__bar--atlas .card__close:hover {
+  border-color: #f55b5b;
+  background: #2a1414;
+}
+
+/* Меню агента, как в прототипе: узкое, значки 14 px. */
+.menu.menu--cmenu {
+  width: 180px;
+  min-width: 0;
+  padding: 5px;
+  gap: 1px;
+  border: 0;
+  border-radius: 6px;
+  background: #1f1f1e;
+  box-shadow:
+    inset 0 0 0 1px #3a3a39,
+    0 20px 40px rgb(0 0 0 / 0.6);
+}
+
+.menu.menu--cmenu > button {
+  gap: 9px;
+  min-height: 0;
+  padding: 7px 10px;
+  border-radius: 4px;
+  color: #e2e2df;
+  font: 12px var(--font-ui);
+}
+
+.menu.menu--cmenu > button:hover {
+  background: #2a2a28;
+}
+
+.menu.menu--cmenu .icon {
+  width: 14px;
+  height: 14px;
+}
+
+
+/* ---------- подсказки, как в прототипе: плашка со срезанным углом над курсором ---------- */
+
+.tip {
+  position: fixed;
+  z-index: 3000;
+  /* Строки не переносятся: плашка растёт по самой длинной до края окна, дальше строка обрезается многоточием. */
+  max-width: calc(100vw - 16px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 5px 9px 6px;
+  background: rgb(12 12 12 / 0.94);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.2);
+  clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 0 100%);
+  color: #d6d6d3;
+  font: 10px/1.45 var(--font-mono);
+  letter-spacing: 0.04em;
+  white-space: pre;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.tip--on {
+  visibility: visible;
+  animation: tip-in 0.45s steps(1, end) both;
+}
+
+.tip--off {
+  visibility: visible;
+  animation: tip-out 0.25s steps(1, end) both;
+}
+
+@keyframes tip-in {
+  0% {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  6% {
+    opacity: 0.85;
+  }
+  11% {
+    opacity: 0;
+  }
+  17% {
+    opacity: 1;
+    transform: translateX(3px);
+  }
+  22% {
+    opacity: 0.1;
+  }
+  30% {
+    opacity: 0.9;
+    transform: translateX(-1px);
+  }
+  35% {
+    opacity: 0.35;
+  }
+  46%,
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes tip-out {
+  0% {
+    opacity: 1;
+  }
+  12% {
+    opacity: 0.2;
+  }
+  20% {
+    opacity: 1;
+  }
+  30%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Экран файла и заметки на плите - та же тёмная линза, что у терминала: редактор и поле прозрачны поверх неё. */
+.card--atlas .cm-editor,
+.card--atlas .cm-editor .cm-gutters,
+.card--atlas .card__text {
+  background: transparent !important;
+}
+
+/* Простой текст файла - светлым серым прототипа; подсвеченное красит палитра (Editor.tsx, atlasHighlight). */
+.card--atlas .cm-content {
+  color: #cfcfcd;
+}
+
+

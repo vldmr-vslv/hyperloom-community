@@ -1,0 +1,65 @@
+{
+  "name": "hyperloom-community",
+  "productName": "Hyperloom Community",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "tsc --noEmit -p tsconfig.json && electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "dist": "npm run build && electron-builder --win",
+    "dist:community": "node scripts/community.mjs && npm --prefix ../Hyperloom-community run dist",
+    "check": "node src/shared/canvas-model.check.ts && node src/shared/route.check.ts && node src/shared/detour.check.ts && node src/shared/graph.check.ts && node src/shared/secrets.check.ts && node src/renderer/src/rings.check.ts && node src/renderer/src/same.check.ts && node src/main/watch.check.ts && node src/main/notes.check.ts && node src/main/files.check.ts && node src/main/page-root.check.ts && node src/main/settings.check.ts && node src/main/terminal.check.ts && node src/main/command-runs.check.ts && node src/main/shell-marks.check.ts && node src/main/summary-template.check.ts && node src/main/roadmap-template.check.ts"
+  },
+  "dependencies": {
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/language-data": "^6.5.2",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/theme-one-dark": "^6.1.3",
+    "@codemirror/view": "^6.43.13",
+    "@lezer/highlight": "^1.2.4",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "@xyflow/react": "^12.11.6",
+    "codemirror": "^6.0.2",
+    "node-pty": "^1.1.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "style-mod": "^4.1.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^44.2.0",
+    "electron-builder": "^26.18.0",
+    "electron-vite": "^5.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^7.3.6"
+  },
+  "build": {
+    "appId": "app.hyperloom.community",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "out/**",
+      "resources/**"
+    ],
+    "npmRebuild": false,
+    "win": {
+      "target": "nsis",
+      "icon": "resources/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false
+    }
+  }
+}

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Активация Hyperloom ProBuild</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-content: center; gap: 18px; text-align: center; padding: 24px;
+      background: #1a1a1a; color: #e6e6e6; font: 16px/1.5 "Segoe UI", system-ui, sans-serif; }
+    h1 { margin: 0; font-size: 24px; font-weight: 600; }
+    p { margin: 0; max-width: 420px; color: #a8a8a8; }
+    a { display: inline-block; padding: 12px 26px; border-radius: 8px; background: #2aabee; color: #fff;
+      text-decoration: none; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>Hyperloom ProBuild</h1>
+  <p id="say">Браузер спросит, открыть ли Hyperloom: разрешите, и программа примет пропуск.</p>
+  <div><a id="open" href="#">Открыть Hyperloom</a></div>
+  <script>
+    // Кнопка бота принимает только http и tg://, поэтому пропуск идёт в ProBuild через эту страницу ссылкой hyperloom://.
+    const pass = new URLSearchParams(location.search).get("pass") ?? "";
+    if (/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(pass)) {
+      const link = `hyperloom://activate?pass=${pass}`;
+      document.getElementById("open").href = link;
+      location.href = link;
+    } else {
+      document.getElementById("say").textContent = "В ссылке нет пропуска. Откройте эту страницу кнопкой из бота @hyper_loom_bot.";
+      document.getElementById("open").hidden = true;
+    }
+  </script>
+</body>
+</html>

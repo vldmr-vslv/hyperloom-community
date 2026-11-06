@@ -1,0 +1,753 @@
+<!doctype html>
+<!--
+  Roadmap скретча Hyperloom.
+
+  Агент берёт шаблон из %APPDATA%/Hyperloom/roadmap/roadmap.html: приложение переписывает его там при
+  каждом запуске. Исходник - resources/roadmap/roadmap.html в репозитории Hyperloom.
+
+  Как сделать страницу: скопировать этот файл в папку скретча под именем roadmap.html и заменить
+  содержимое блока данных своими - это JSON в теге script с id roadmap-data ближе к концу файла. Остальное
+  не трогать. В блоке сейчас образец: скаут в середине работы. В строках данных вместо "</" писать "<\/",
+  иначе блок закроется раньше времени. Схема ниже нарочно без кавычек у ключей и без самого тега: та
+  первого вхождения ключа или тега находит настоящие данные, а не этот комментарий.
+
+  Данные (в JSON ключи в кавычках):
+  {
+    scratch: { slug: "scout", title: "Заголовок скретча", spec: "_scratch/scout/spec.md" },   spec необязателен
+    calibration: { factor: 1.25, tickets: 6, scope: "project" | "all" | "none" },
+    tickets: [
+      {
+        number: "03",                          строка или число, по нему ссылаются blockedBy
+        title: "Заголовок тикета",
+        path: "_scratch/scout/issues/03-x.md",
+        blockedBy: ["01", "02"],               номера тикетов этого же списка, пустой массив - ничего не ждёт
+        status: "in-progress",                 значение строки Status: тикета
+        estimate: {
+          agent: 55, lead: 35,                 минуты агента и человека, уже с Calibration
+          windows: 2,                          окна, целое
+          raw: { agent: 44, lead: 28 }         сырая оценка агента до Calibration
+        },
+        started: "2026-10-14T10:05:00+05:00",  необязательно: время первого старта, ISO
+        actual: { minutes: 49, windows: 1 },   необязательно: после коммита; minutes - от первого старта до коммита
+                                               необязательно в actual: agent, lead, idle - минуты агента, человека и
+                                               простоя по транскриптам сессий
+        finished: "2026-10-14T10:54:00+05:00", необязательно: конец закрытого тикета без started, ISO
+        criteria: { done: 2, total: 7 }        критерии приёмки, отмечено из всего
+      }
+    ]
+  }
+  calibration: factor - множитель, которым сырая оценка стала оценкой; tickets - по скольким тикетам он
+  посчитан; scope - по тикетам этого проекта, по всем или без Calibration.
+  Статусы: closed значит готово, in-progress в работе, ready-for-human за тобой, wontfix снят и на
+  календарь не встаёт, остальные ждут.
+  Факт закрытого: actual.agent плюс actual.lead, а без них actual.minutes.
+  Календарь: конец закрытого равен started плюс actual.minutes, а без них finished; начало равно started, а без него
+  конец минус actual.minutes или оценка (агент плюс человек). Незакрытые встают одной очередью от "сейчас", конец одного
+  становится началом следующего: в работе и за тобой первыми, потом ждущие, скретч за скретчем, внутри по номеру,
+  блокировка раньше заблокированного. Очередь идёт сутки напролёт. Закрытый без started и finished на
+  календаре не виден.
+  Строки: скретчи с тикетами в работе сверху, со ждущими посередине, закрытые снизу; скретч это папка из path
+  (_scratch/<скретч>/...), путь не из скретча идёт в скретч страницы.
+-->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roadmap</title>
+<style>
+  /* Цвета - тёмная тема полотна Hyperloom (src/renderer/src/index.css), как у сводки тикета. Шрифты названы
+     первыми и берутся, если стоят в системе; сеть страница не просит, запасные - системные. */
+  :root {
+    color-scheme: dark;
+    --canvas: #1a1a1a;
+    --surface: #1c1c1c;
+    --raised: #242424;
+    --line: #262626;
+    --line2: #333333;
+    --text: #ececec;
+    --muted: #999999;
+    --focus: #8ab4ff;
+    --agent: #a98bff;
+    --agent-deep: #241d3d;
+    --lead: #f5b83d;
+    --done: #47d68a;
+    --done-deep: #12291b;
+    --now: #ff6b6b;
+    --danger-text: #ffa4a4;
+    --danger-surface: #2c1417;
+    --ui: "Onest", system-ui, sans-serif;
+    --mono: "JetBrains Mono", Consolas, "Cascadia Mono", monospace;
+    --name: 300px;
+    --rh: 28px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--canvas); color: var(--text); font: 13px/1.4 var(--ui); -webkit-font-smoothing: antialiased; }
+  #app { height: 100%; display: flex; flex-direction: column; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+
+  header { padding: 12px 16px 10px; display: flex; gap: 12px 24px; align-items: flex-end; flex-wrap: wrap; border-bottom: 1px solid var(--line); }
+  .eyebrow { font: 500 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+  .title { font: 600 16px/1.3 var(--ui); margin: 6px 0 0; }
+  .sum { display: flex; gap: 12px 26px; flex-wrap: wrap; }
+  .fact .k { font: 10px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .12em; }
+  .fact .v { font: 600 18px/1.3 var(--ui); font-variant-numeric: tabular-nums; }
+  .fact .m { font: 11px var(--mono); color: var(--muted); }
+  .zoom { display: flex; gap: 4px; margin-left: auto; }
+  button { font: 12px var(--mono); color: var(--text); background: var(--raised); border: 1px solid var(--line2); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  button.on { border-color: var(--agent); color: var(--agent); }
+  button.now { border-color: var(--now); color: var(--now); }
+  .legend { display: flex; gap: 6px 14px; flex-wrap: wrap; font: 11px var(--mono); color: var(--muted); width: 100%; }
+  .legend i { display: inline-block; width: 18px; height: 8px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+
+  .scroll { flex: 1; overflow: auto; position: relative; cursor: grab; user-select: none; }
+  .scroll.grabbing, .scroll.grabbing * { cursor: grabbing !important; }
+  .sheet { position: relative; }
+  .head { position: sticky; top: 0; z-index: 4; display: flex; background: var(--surface); border-bottom: 1px solid var(--line2); }
+  .head .corner { position: sticky; left: 0; z-index: 5; width: var(--name); flex: none; background: var(--surface); border-right: 1px solid var(--line2);
+    font: 11px var(--mono); color: var(--muted); padding: 8px 12px; text-transform: uppercase; letter-spacing: .1em; }
+  .scale { position: relative; height: 44px; flex: none; }
+  .scale span { position: absolute; font: 10px var(--mono); color: var(--muted); white-space: nowrap; padding-left: 4px; border-left: 1px solid var(--line2); }
+  .scale .top { top: 4px; height: 18px; color: var(--text); }
+  .scale .bot { top: 24px; height: 18px; }
+  .row { display: flex; height: var(--rh); border-bottom: 1px solid #202020; }
+  .row:hover { background: rgba(255, 255, 255, .025); }
+  .name { position: sticky; left: 0; z-index: 2; width: var(--name); flex: none; background: var(--canvas); border-right: 1px solid var(--line2);
+    padding: 0 12px; display: flex; align-items: center; gap: 8px; white-space: nowrap; overflow: hidden; }
+  .row:hover .name { background: #1f1f1f; }
+  .name .t { overflow: hidden; text-overflow: ellipsis; }
+  .name .n { font: 11px var(--mono); color: var(--muted); flex: none; }
+  .name .c { margin-left: auto; font: 11px var(--mono); color: var(--muted); font-weight: 400; flex: none; }
+  .name .new { font: 500 10px var(--mono); color: var(--lead); flex: none; }
+  .row.sec { height: 26px; }
+  .row.sec .name { font: 600 11px var(--mono); text-transform: uppercase; letter-spacing: .14em; color: var(--muted); }
+  .row.sec.s0 .name { color: var(--lead); }
+  .row.sec.s2 .name { color: var(--done); }
+  .row.cl { cursor: pointer; height: 34px; background: #1d1d1d; }
+  .row.cl .name { background: #1d1d1d; font-weight: 600; }
+  .row.cl .arr { width: 10px; color: var(--muted); }
+  .row.tk { cursor: pointer; }
+  .row.hot .name { box-shadow: inset 3px 0 0 var(--lead); }
+  .row.cl.hot, .row.cl.hot .name { background: #262013; }
+  .row.tk.hot, .row.tk.hot .name { background: #1f1b12; }
+  /* Новое с прошлого просмотра - янтарём, как точка "есть новое" на кнопке Roadmap в карточке агента. */
+  .row.fresh .name { box-shadow: inset 3px 0 0 var(--lead); background: #221d12; }
+  .row.fresh .bar { box-shadow: 0 0 0 2px var(--lead), 0 0 12px rgba(245, 184, 61, .6); animation: fresh 1.6s ease-in-out 3; }
+  @keyframes fresh { 50% { box-shadow: 0 0 0 2px var(--lead), 0 0 22px rgba(245, 184, 61, .9); } }
+  .row.cl.fresh-in .name .t { color: var(--lead); }
+  .row.picked, .row.picked .name { background: #231f33 !important; }
+  .track { position: relative; flex: none; }
+  .bar { position: absolute; top: 7px; height: 14px; border-radius: 3px; min-width: 3px; }
+  .row.cl .bar { top: 9px; height: 16px; }
+  .done { background: var(--done); }
+  .doing { background: repeating-linear-gradient(-45deg, var(--agent) 0 6px, #7d62d6 6px 12px); background-size: 17px 17px; animation: run 1s linear infinite; }
+  @keyframes run { to { background-position: 17px 0; } }
+  .human { background: #2a2011; border: 1px solid var(--lead); }
+  .waiting { background: var(--agent-deep); border: 1px solid var(--agent); }
+  .triage { background: transparent; border: 1px dashed #777; }
+  .cl-done { background: var(--done-deep); border: 1px solid var(--done); }
+  .cl-plan { background: var(--agent-deep); border: 1px dashed var(--agent); }
+  .bar.flash { animation: flash 1.2s ease-out 2; }
+  @keyframes flash { 0%, 100% { box-shadow: 0 0 0 0 rgba(169, 139, 255, 0); } 30% { box-shadow: 0 0 0 5px rgba(169, 139, 255, .55); } }
+  .lbl { position: absolute; top: 6px; font: 10px var(--mono); color: var(--muted); white-space: nowrap; pointer-events: none; }
+  .row.cl .lbl { top: 9px; }
+  .grid { position: absolute; top: 0; bottom: 0; pointer-events: none; z-index: 1; }
+  .grid i { position: absolute; top: 0; bottom: 0; border-left: 1px solid #232323; }
+  .grid i.day { border-left-color: #383838; }
+  .grid b { position: absolute; top: 0; bottom: 0; background: rgba(255, 255, 255, .018); }
+  .nowline { position: absolute; top: 0; bottom: 0; border-left: 2px solid var(--now); z-index: 3; pointer-events: none; }
+  .nowline span { position: sticky; top: 50px; display: inline-block; margin-left: 4px; font: 10px var(--mono); color: var(--now); background: var(--canvas); padding: 1px 4px; }
+
+  .tip { position: fixed; z-index: 9; pointer-events: none; background: #2a2a2a; border: 1px solid #444; border-radius: 6px; padding: 7px 10px;
+    font: 12px var(--mono); max-width: 420px; display: none; box-shadow: 0 6px 20px rgba(0, 0, 0, .5); }
+  .tip .h { font: 600 13px var(--ui); margin-bottom: 4px; }
+  .tip .m { color: var(--muted); }
+  .detail { position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 8; background: #222; border: 1px solid #444; border-radius: 10px;
+    padding: 14px 18px; box-shadow: 0 10px 30px rgba(0, 0, 0, .6); }
+  .detail[hidden] { display: none; }
+  .detail .h { font: 600 15px var(--ui); margin-bottom: 10px; padding-right: 30px; }
+  .detail .h .n { font: 12px var(--mono); color: var(--muted); }
+  .detail .st { font: 11px var(--mono); padding: 2px 6px; border-radius: 4px; margin-left: 8px; background: var(--raised); color: var(--agent); }
+  .detail .st.done { color: var(--done); }
+  .detail .st.doing, .detail .st.human { color: var(--lead); }
+  .detail .facts { display: flex; flex-wrap: wrap; gap: 10px 32px; margin-bottom: 8px; }
+  .detail .m { font: 11px var(--mono); color: var(--muted); }
+  .detail .x { position: absolute; top: 10px; right: 10px; }
+  .detail .crit-open { margin-top: 4px; padding: 2px 8px; font-size: 11px; }
+  .detail .crit { max-height: 38vh; overflow: auto; margin: 4px 0 10px; padding: 0; list-style: none; font: 12px/1.45 var(--ui); }
+  .detail .crit li { display: flex; gap: 8px; padding: 3px 0; border-bottom: 1px solid #2c2c2c; }
+  .detail .crit li i { flex: none; width: 15px; height: 15px; margin-top: 2px; border: 1px solid #555; border-radius: 3px; font: 700 10px/13px var(--mono); text-align: center; font-style: normal; color: #1a1a1a; }
+  .detail .crit li.ok i { background: var(--done); border-color: var(--done); }
+  .detail .crit li.ok { color: var(--muted); }
+  .detail .crit li.muted { color: var(--muted); border: 0; }
+  .broken { margin: 28px 20px; padding: 16px 18px; border-radius: 10px; background: var(--danger-surface); }
+  .broken h1 { font-size: 16px; margin: 0 0 8px; color: var(--danger-text); }
+  .broken li { color: var(--text); }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<main id="app"></main>
+
+<script type="application/json" id="roadmap-data">
+{
+  "scratch": { "slug": "scout", "title": "Скаут: разбор ссылки на пригодность для нашей системы", "spec": "_scratch/scout/spec.md" },
+  "calibration": { "factor": 1.25, "tickets": 6, "scope": "project" },
+  "tickets": [
+    {
+      "number": "01", "title": "Инвентарь машины: gh, yt-dlp, Ollama", "path": "_scratch/scout/issues/01-inventory.md",
+      "blockedBy": [], "status": "closed",
+      "estimate": { "agent": 15, "lead": 5, "windows": 1, "raw": { "agent": 12, "lead": 4 } },
+      "started": "2026-10-14T10:00:00+05:00",
+      "actual": { "minutes": 18, "windows": 1 },
+      "criteria": { "done": 7, "total": 7 }
+    },
+    {
+      "number": "02", "title": "Проверка заметки скаута", "path": "_scratch/scout/issues/02-note-check.md",
+      "blockedBy": [], "status": "closed",
+      "estimate": { "agent": 25, "lead": 10, "windows": 1, "raw": { "agent": 20, "lead": 8 } },
+      "started": "2026-10-14T10:00:00+05:00",
+      "actual": { "minutes": 49, "windows": 1 },
+      "criteria": { "done": 6, "total": 6 }
+    },
+    {
+      "number": "03", "title": "Скаут на репозитории и статье", "path": "_scratch/scout/issues/03-repo-and-article.md",
+      "blockedBy": ["01", "02"], "status": "in-progress",
+      "estimate": { "agent": 55, "lead": 35, "windows": 2, "raw": { "agent": 44, "lead": 28 } },
+      "started": "2026-10-14T10:49:00+05:00",
+      "criteria": { "done": 2, "total": 7 }
+    },
+    {
+      "number": "04", "title": "Скаут на видео", "path": "_scratch/scout/issues/04-video.md",
+      "blockedBy": ["03"], "status": "ready-for-agent",
+      "estimate": { "agent": 40, "lead": 25, "windows": 1, "raw": { "agent": 32, "lead": 20 } },
+      "criteria": { "done": 0, "total": 5 }
+    }
+  ]
+}
+</script>
+<script id="roadmap-logic">
+// Логика страницы без обращения к document: проверка гоняет этот блок в пустом контексте
+// (src/main/roadmap-template.check.ts).
+const STATUS_ROLES = { closed: "done", "in-progress": "doing", "ready-for-human": "human", wontfix: "dropped" };
+const ROLE_NAMES = { waiting: "ждёт", doing: "в работе", done: "готово", human: "за тобой", dropped: "снят" };
+const SCOPES = ["project", "all", "none"];
+const MINUTE = 60000, HOUR = 60 * MINUTE, DAY = 24 * HOUR;
+
+/** Роль тикета по строке Status: готово, в работе, за тобой, снят; всё прочее - ждёт. */
+function statusRole(status) {
+  return Object.prototype.hasOwnProperty.call(STATUS_ROLES, status) ? STATUS_ROLES[status] : "waiting";
+}
+
+/** Данные Roadmap из текста блока: { data } или { errors } - что именно не так, по строке на поле. */
+function parseRoadmap(text) {
+  let value;
+  try {
+    value = JSON.parse(text);
+  } catch (error) {
+    return { errors: [`данные не разбираются как JSON: ${error.message}`] };
+  }
+  const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+  const isText = (v) => typeof v === "string" && v.trim() !== "";
+  const isMinutes = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0;
+  const isCount = (v) => Number.isInteger(v) && v >= 0;
+  const isNumber = (v) => (typeof v === "number" && Number.isFinite(v)) || isText(v);
+  if (!isObject(value)) return { errors: ["данные - не объект"] };
+  const errors = [];
+
+  const scratch = value.scratch;
+  if (!isObject(scratch)) errors.push("scratch: нужен объект");
+  else {
+    if (!isText(scratch.slug)) errors.push("scratch.slug: нужна строка");
+    if (!isText(scratch.title)) errors.push("scratch.title: нужна строка");
+    if (scratch.spec !== undefined && !isText(scratch.spec)) errors.push("scratch.spec: нужна строка");
+  }
+  const calibration = value.calibration;
+  if (!isObject(calibration)) errors.push("calibration: нужен объект");
+  else {
+    if (!(typeof calibration.factor === "number" && calibration.factor > 0)) errors.push("calibration.factor: нужно число больше 0");
+    if (!isCount(calibration.tickets)) errors.push("calibration.tickets: нужно целое от 0");
+    if (!SCOPES.includes(calibration.scope)) errors.push("calibration.scope: нужно project, all или none");
+  }
+  if (!Array.isArray(value.tickets) || value.tickets.length === 0) {
+    errors.push("tickets: нужен непустой массив");
+    return { errors };
+  }
+
+  const seen = new Set();
+  value.tickets.forEach((t, i) => {
+    const at = `tickets[${i}]`;
+    if (!isObject(t)) return errors.push(`${at}: нужен объект`);
+    if (!isNumber(t.number)) errors.push(`${at}.number: нужна строка или число`);
+    else if (seen.has(String(t.number))) errors.push(`${at}.number: номер ${t.number} уже есть`);
+    else seen.add(String(t.number));
+    if (!isText(t.title)) errors.push(`${at}.title: нужна строка`);
+    if (!isText(t.path)) errors.push(`${at}.path: нужна строка`);
+    if (!Array.isArray(t.blockedBy) || !t.blockedBy.every(isNumber)) errors.push(`${at}.blockedBy: нужен массив номеров`);
+    if (!isText(t.status)) errors.push(`${at}.status: нужна строка`);
+    const e = t.estimate;
+    if (!isObject(e)) errors.push(`${at}.estimate: нужен объект`);
+    else {
+      if (!isMinutes(e.agent)) errors.push(`${at}.estimate.agent: нужны минуты, число от 0`);
+      if (!isMinutes(e.lead)) errors.push(`${at}.estimate.lead: нужны минуты, число от 0`);
+      if (!isCount(e.windows)) errors.push(`${at}.estimate.windows: нужно целое от 0`);
+      if (!isObject(e.raw) || !isMinutes(e.raw.agent) || !isMinutes(e.raw.lead)) {
+        errors.push(`${at}.estimate.raw: нужны минуты agent и lead, числа от 0`);
+      }
+    }
+    for (const key of ["started", "finished"]) {
+      if (t[key] !== undefined && !(typeof t[key] === "string" && !Number.isNaN(Date.parse(t[key])))) {
+        errors.push(`${at}.${key}: нужно время ISO`);
+      }
+    }
+    if (t.actual !== undefined && !(isObject(t.actual) && isMinutes(t.actual.minutes) && isCount(t.actual.windows))) {
+      errors.push(`${at}.actual: нужны minutes, число от 0, и windows, целое от 0`);
+    }
+    for (const key of ["agent", "lead", "idle"]) {
+      if (isObject(t.actual) && key in t.actual && !isMinutes(t.actual[key])) errors.push(`${at}.actual.${key}: нужны минуты, число от 0`);
+    }
+    if (isObject(t.actual) && ("agent" in t.actual) !== ("lead" in t.actual)) {
+      errors.push(`${at}.actual: agent и lead только вместе`);
+    }
+    const c = t.criteria;
+    if (!(isObject(c) && isCount(c.done) && isCount(c.total) && c.done <= c.total)) {
+      errors.push(`${at}.criteria: нужны done и total, целые от 0, done не больше total`);
+    }
+  });
+  if (errors.length > 0) return { errors };
+
+  const tickets = value.tickets.map((t) => ({ ...t, number: String(t.number), blockedBy: t.blockedBy.map(String) }));
+  const byNumber = new Map(tickets.map((t) => [t.number, t]));
+  tickets.forEach((t, i) => {
+    for (const b of t.blockedBy) if (!byNumber.has(b)) errors.push(`tickets[${i}].blockedBy: нет тикета ${b}`);
+  });
+  if (errors.length > 0) return { errors };
+  // Кольцо блокировок: очередь по нему не построить.
+  const state = new Map();
+  const loop = (n) => {
+    if (state.get(n) === "done") return null;
+    if (state.get(n) === "open") return n;
+    state.set(n, "open");
+    for (const b of byNumber.get(n).blockedBy) {
+      const found = loop(b);
+      if (found) return found;
+    }
+    state.set(n, "done");
+    return null;
+  };
+  for (const t of tickets) {
+    const found = loop(t.number);
+    if (found) return { errors: [`tickets: блокировки по кругу через тикет ${found}`] };
+  }
+  return { data: { ...value, tickets } };
+}
+
+/** Скретч тикета - папка из пути _scratch/<скретч>/...; путь не из скретча - скретч страницы. */
+function scratchOf(t, fallback) {
+  const match = /(?:^|[\\/])_scratch[\\/]([^\\/]+)[\\/]/.exec(t.path);
+  return match ? match[1] : fallback;
+}
+
+/** Начало и конец тикета по часам, мс. Начало - started. Конец есть только у закрытого: started плюс
+ *  actual.minutes (время от первого старта до коммита, с простоем), а без них - finished. */
+function ticketTimes(t) {
+  const start = t.started === undefined ? undefined : Date.parse(t.started);
+  if (statusRole(t.status) !== "done") return { start };
+  const end = start !== undefined && t.actual ? start + t.actual.minutes * MINUTE
+    : t.finished === undefined ? undefined : Date.parse(t.finished);
+  return { start, end };
+}
+
+/** Факт замера, мин: работа агента и человека без простоя, а у замера без них - время от старта до коммита. */
+const factOf = (actual) => (actual.agent !== undefined && actual.lead !== undefined ? actual.agent + actual.lead : actual.minutes);
+const byTicketNumber = (a, b) => a.number.localeCompare(b.number, "ru", { numeric: true });
+const sumOf = (list, f) => list.reduce((s, t) => s + f(t), 0);
+const spanOf = (list) => (list.length ? [Math.min(...list.map((t) => t.start)), Math.max(...list.map((t) => t.end))] : null);
+const STAGES = { doing: 0, human: 0, waiting: 1, done: 2 };
+
+/**
+ * Всё, что показывает страница, по часам машины (мс): у каждого тикета start и end на календаре (см. "Календарь" в
+ * комментарии шаблона), скретчи строками и итоги. У скретча stage: 0 есть в работе или за тобой, 1 есть ждущие,
+ * 2 всё закрыто; plan и left: минуты оценок всего и незакрытого, fact: минуты замеров, closed и ahead: размах
+ * закрытого и незакрытого на календаре, undated: закрытые без даты. end: конец очереди.
+ */
+function gantt(data, now) {
+  const tickets = data.tickets.filter((t) => statusRole(t.status) !== "dropped").map((t) => ({
+    ...t, role: statusRole(t.status), scratch: scratchOf(t, data.scratch.slug), minutes: t.estimate.agent + t.estimate.lead,
+  }));
+  for (const t of tickets) {
+    const { start, end } = ticketTimes(t);
+    if (t.role !== "done" || end === undefined) continue;
+    t.end = end;
+    t.start = start ?? end - (t.actual ? t.actual.minutes : t.minutes) * MINUTE;
+  }
+  const late = (t) => (t.role === "waiting" ? 1 : 0);
+  const open = tickets.filter((t) => t.role !== "done");
+  const scratches = [...new Set([...open].sort((a, b) => late(a) - late(b)).map((t) => t.scratch))];
+  open.sort((a, b) => late(a) - late(b) || scratches.indexOf(a.scratch) - scratches.indexOf(b.scratch) || byTicketNumber(a, b));
+  const byNumber = new Map(tickets.map((t) => [t.number, t]));
+  const waits = new Set(open);
+  let end = now;
+  // ponytail: поиск следующего проходит по очереди на каждый тикет, O(n^2); на 5000 тикетов это 25 млн сравнений.
+  while (waits.size) {
+    const t = open.find((o) => waits.has(o) && o.blockedBy.every((b) => !waits.has(byNumber.get(b))));
+    t.start = t.role === "doing" && t.started ? Math.min(Date.parse(t.started), end) : end;
+    t.end = end + t.minutes * MINUTE;
+    end = t.end;
+    waits.delete(t);
+  }
+
+  const rank = (t) => STAGES[t.role] * 2 + (t.start === undefined ? 1 : 0);
+  const groups = [...Map.groupBy(tickets, (t) => t.scratch)].map(([slug, list]) => {
+    list.sort((a, b) => rank(a) - rank(b) || (a.start ?? 0) - (b.start ?? 0) || byTicketNumber(a, b));
+    const done = list.filter((t) => t.role === "done"), left = list.filter((t) => t.role !== "done");
+    const measured = done.filter((t) => t.actual);
+    const dated = list.filter((t) => t.start !== undefined);
+    return {
+      slug, tickets: list, stage: Math.min(...list.map((t) => STAGES[t.role])), done: done.length,
+      plan: sumOf(list, (t) => t.minutes), left: sumOf(left, (t) => t.minutes),
+      fact: measured.length ? sumOf(measured, (t) => factOf(t.actual)) : undefined,
+      closed: spanOf(done.filter((t) => t.end !== undefined)), ahead: spanOf(left), span: spanOf(dated),
+      undated: done.length - done.filter((t) => t.end !== undefined).length,
+    };
+  });
+  // Закрытые скретчи: свежие сверху; прочие по началу.
+  groups.sort((a, b) => a.stage - b.stage
+    || (a.stage === 2 ? (b.span?.[1] ?? -Infinity) - (a.span?.[1] ?? -Infinity) : (a.span?.[0] ?? Infinity) - (b.span?.[0] ?? Infinity)));
+  const closed = tickets.filter((t) => t.role === "done"), measured = closed.filter((t) => t.actual);
+  return {
+    tickets, groups, end,
+    plan: sumOf(tickets, (t) => t.minutes), left: sumOf(open, (t) => t.minutes), open: open.length,
+    doing: open.filter((t) => t.role !== "waiting").length, closed: closed.length, measured: measured.length,
+    fact: sumOf(measured, (t) => factOf(t.actual)), factPlan: sumOf(measured, (t) => t.minutes),
+  };
+}
+
+/** Минуты словами: 14 мин, 2 ч, 3 ч 10 мин. */
+function minutesText(m) {
+  const total = Math.max(0, Math.round(m));
+  const h = Math.floor(total / 60);
+  const r = total % 60;
+  return !h ? `${r} мин` : !r ? `${h} ч` : `${h} ч ${r} мин`;
+}
+
+/** Отклонение со знаком: +14 мин, -5 мин; ноль - "в срок". */
+function driftText(m) {
+  const r = Math.round(m);
+  return r === 0 ? "в срок" : `${r > 0 ? "+" : "-"}${minutesText(Math.abs(r))}`;
+}
+
+const two = (n) => String(n).padStart(2, "0");
+const dayText = (ms) => { const d = new Date(ms); return `${two(d.getDate())}.${two(d.getMonth() + 1)}`; };
+const timeText = (ms) => { const d = new Date(ms); return `${two(d.getHours())}:${two(d.getMinutes())}`; };
+const whenText = (ms) => `${dayText(ms)} ${timeText(ms)}`;
+
+/** Номер -> статус: это страница отдаёт окну приложения, и с этим окно сравнивает в следующий раз. */
+function ticketStates(tickets) {
+  return Object.fromEntries(tickets.map((t) => [t.number, t.status]));
+}
+
+/** Новое с прошлого просмотра: номер -> "new", если тикета не было, или прежняя роль, если роль сменилась.
+ *  Прошлого снимка нет - и нового нет: сравнивать не с чем. */
+function news(tickets, seen) {
+  const fresh = new Map();
+  if (!seen) return fresh;
+  for (const t of tickets) {
+    if (!Object.prototype.hasOwnProperty.call(seen, t.number)) fresh.set(t.number, "new");
+    else if (statusRole(seen[t.number]) !== statusRole(t.status)) fresh.set(t.number, statusRole(seen[t.number]));
+  }
+  return fresh;
+}
+
+/** Подпись нового: "новый" или "было: ждёт". */
+function newsText(mark) {
+  return mark === "new" ? "новый" : `было: ${ROLE_NAMES[mark]}`;
+}
+
+</script>
+<script>
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const ZOOMS = [["часы", 120], ["день", 18], ["неделя", 3], ["всё", 0]];  // пикселей на час; 0 значит вписать в экран
+const STAGE_NAMES = ["в работе", "дальше по очереди", "готово"];
+const fact = (k, v, m) => `<div class="fact"><div class="k">${k}</div><div class="v">${v}</div><div class="m">${m}</div></div>`;
+
+function boot() {
+  const app = document.getElementById("app");
+  const { data, errors } = parseRoadmap(document.getElementById("roadmap-data").textContent);
+  if (errors) {
+    app.innerHTML = `<div class="broken"><h1>Данные Roadmap не разобраны</h1><ul>${errors.map((e) => `<li>${esc(e)}</li>`).join("")}</ul></div>`;
+    return;
+  }
+  const now = Date.now();
+  const view = gantt(data, now);
+  app.innerHTML = page(data, view, now);
+  wire(data, view, now);
+  // Во фрейме приложения: статусы тикетов уходят окну, оно ответит прошлым снимком (wire).
+  if (parent !== window) parent.postMessage({ type: "hyperloom:roadmap-tickets", tickets: ticketStates(data.tickets) }, "*");
+}
+
+function page(data, view, now) {
+  const fct = view.measured
+    ? fact("факт", minutesText(view.fact), `${view.measured} из ${view.closed} закрытых, ${driftText(view.fact - view.factPlan)} к плану`)
+    : fact("факт", "не измерен", `закрыто ${view.closed}, замеров нет`);
+  return `
+    <header>
+      <div><div class="eyebrow">Roadmap / ${esc(data.scratch.slug)}</div><h1 class="title">${esc(data.scratch.title)}</h1></div>
+      <div class="sum">
+        ${fact("план", minutesText(view.plan), `${view.tickets.length} тикетов, оценки агента и твои`)}
+        ${fct}
+        ${fact("осталось", minutesText(view.left), `${view.open} тикетов, в работе ${view.doing}`)}
+        ${fact("прогноз", view.open ? whenText(view.end) : "готово", `конец очереди, сейчас ${whenText(now)}`)}
+      </div>
+      <div class="zoom">${ZOOMS.map(([n, z]) => `<button data-z="${z}">${n}</button>`).join("")}<button class="now" data-now>к сейчас</button></div>
+      <div class="legend" aria-hidden="true">
+        <span><i class="done"></i>закрыт: конец в дату закрытия, начало раньше на факт или оценку</span>
+        <span><i class="doing"></i>в работе</span>
+        <span><i class="human"></i>за тобой</span>
+        <span><i class="waiting"></i>ждёт, по очереди от "сейчас"</span>
+        <span><i class="triage"></i>не разобран</span>
+        <span style="color:var(--now)">| сейчас</span>
+      </div>
+    </header>
+    <div class="scroll" id="scroll"><div class="sheet" id="sheet"></div></div>
+    <div class="tip" id="tip"></div>
+    <section class="detail" id="detail" aria-live="polite" hidden></section>`;
+}
+
+function wire(data, view, now) {
+  const sc = document.getElementById("scroll"), sheet = document.getElementById("sheet");
+  const tip = document.getElementById("tip"), panel = document.getElementById("detail");
+  const byNumber = new Map(view.tickets.map((t) => [t.number, t]));
+  const dated = view.tickets.filter((t) => t.start !== undefined);
+  const from = (() => { const d = new Date(Math.min(now, ...dated.map((t) => t.start)) - DAY); d.setHours(0, 0, 0, 0); return d.getTime(); })();
+  const to = Math.max(now, ...dated.map((t) => t.end)) + DAY;
+  const nameW = Math.round(Math.min(300, Math.max(160, innerWidth * 0.32)));
+  document.documentElement.style.setProperty("--name", `${nameW}px`);
+  const expanded = new Set(view.groups.filter((g) => g.stage < 2).map((g) => g.slug));
+  let pxh = 18, fit = false, picked = null, fresh = new Map();
+  const x = (ms) => ((ms - from) / HOUR) * pxh;
+  const status = (t) => (t.status === "needs-triage" ? "triage" : t.role);
+
+  const scale = () => {
+    let top = "", bot = "", grid = "";
+    const hourStep = [1, 2, 3, 6, 12].find((s) => s * pxh >= 36);
+    for (let d = new Date(from); d.getTime() < to; d.setDate(d.getDate() + 1)) {
+      const ms = d.getTime();
+      if (d.getDay() === 0 || d.getDay() === 6) grid += `<b style="left:${x(ms)}px;width:${pxh * 24}px"></b>`;
+      grid += `<i class="day" style="left:${x(ms)}px"></i>`;
+      if (pxh * 24 >= 40 || d.getDay() === 1) top += `<span class="top" style="left:${x(ms)}px">${dayText(ms)} ${["вс", "пн", "вт", "ср", "чт", "пт", "сб"][d.getDay()]}</span>`;
+      if (hourStep) for (let h = hourStep; h < 24; h += hourStep) {
+        bot += `<span class="bot" style="left:${x(ms + h * HOUR)}px">${two(h)}</span>`;
+        grid += `<i style="left:${x(ms + h * HOUR)}px"></i>`;
+      }
+    }
+    return { top, bot, grid };
+  };
+  const bar = (cls, [a, b], label) => {
+    const l = x(a), w = Math.max(3, x(b) - l);
+    return `<div class="bar ${cls}" style="left:${l}px;width:${w}px"></div>${label ? `<div class="lbl" style="left:${l + w + 6}px">${label}</div>` : ""}`;
+  };
+  const groupRow = (g, W) => {
+    const open = expanded.has(g.slug), news = g.tickets.filter((t) => fresh.has(t.number)).length;
+    const sums = g.stage === 2 ? `план ${minutesText(g.plan)}, факт ${g.fact === undefined ? "не измерен" : minutesText(g.fact)}`
+      : `осталось ${minutesText(g.left)} из ${minutesText(g.plan)}, прогноз ${whenText(g.ahead[1])}`;
+    const label = `${g.closed ? `${dayText(g.closed[0])} - ${dayText(g.closed[1])}, ` : ""}${sums}${g.undated ? `, без даты: ${g.undated}` : ""}`;
+    return `<div class="row cl${g.stage === 0 ? " hot" : ""}${news ? " fresh-in" : ""}" data-g="${esc(g.slug)}" tabindex="0" role="button" aria-expanded="${open}">
+      <div class="name"><span class="arr">${open ? "-" : "+"}</span><span class="t">${esc(g.slug)}</span>${news ? `<span class="new">+${news} новых</span>` : ""}<span class="c">${g.done}/${g.tickets.length}</span></div>
+      <div class="track" style="width:${W}px">${g.closed ? bar("cl-done", g.closed) : ""}${g.ahead ? bar("cl-plan", g.ahead) : ""}
+      ${g.span ? `<div class="lbl" style="left:${x(g.span[1]) + 8}px">${label}</div>` : ""}</div></div>`;
+  };
+  const ticketRow = (t, W) => {
+    const label = t.start === undefined ? "закрыт, даты нет" : t.role === "done" ? timeText(t.end) : minutesText(t.minutes);
+    const mark = fresh.get(t.number);
+    return `<div class="row tk${t.role === "doing" || t.role === "human" ? " hot" : ""}${mark ? " fresh" : ""}${t.number === picked ? " picked" : ""}" data-t="${esc(t.number)}" tabindex="0" role="button">
+      <div class="name"><span class="n">${esc(t.number.split("/").at(-1))}</span><span class="t">${esc(t.title)}</span>${mark ? `<span class="new">${newsText(mark)}</span>` : ""}</div>
+      <div class="track" style="width:${W}px">${t.start === undefined ? `<div class="lbl" style="left:${x(now) + 8}px">${label}</div>` : bar(status(t), [t.start, t.end], label)}</div></div>`;
+  };
+
+  const draw = (keep) => {
+    const keepMs = keep ?? from + ((sc.scrollLeft + (sc.clientWidth - nameW) / 2) / pxh) * HOUR;
+    if (fit) pxh = Math.max(0.2, (sc.clientWidth - nameW - 40) / ((to - from) / HOUR));
+    const W = x(to), { top, bot, grid } = scale();
+    let rows = "", stage = -1;
+    for (const g of view.groups) {
+      if (g.stage !== stage) {
+        stage = g.stage;
+        rows += `<div class="row sec s${stage}"><div class="name">${STAGE_NAMES[stage]} <span class="c">${view.groups.filter((h) => h.stage === stage).length}</span></div><div class="track" style="width:${W}px"></div></div>`;
+      }
+      rows += groupRow(g, W);
+      if (expanded.has(g.slug)) for (const t of g.tickets) rows += ticketRow(t, W);
+    }
+    sheet.innerHTML = `
+      <div class="head"><div class="corner">скретч / тикет</div><div class="scale" style="width:${W}px">${top}${bot}</div></div>
+      ${rows}
+      <div class="grid" style="left:${nameW}px;width:${W}px">${grid}</div>
+      <div class="nowline" style="left:${nameW + x(now)}px"><span>сейчас ${timeText(now)}</span></div>`;
+    sheet.style.width = `${nameW + W}px`;
+    sc.scrollLeft = x(keepMs) - (sc.clientWidth - nameW) / 2;
+    document.querySelectorAll(".zoom [data-z]").forEach((b) => b.classList.toggle("on", fit ? b.dataset.z === "0" : +b.dataset.z === pxh));
+  };
+
+  // Щелчок по тикету: экран едет к его полосе, полоса вспыхивает, снизу карточка с планом, фактом и прогнозом.
+  const fly = (n, instant) => {
+    const t = byNumber.get(n);
+    if (!t) return;
+    picked = n;
+    expanded.add(t.scratch);
+    draw();
+    const row = sheet.querySelector(`.row[data-t="${CSS.escape(n)}"]`);
+    const mid = t.start === undefined ? now : (t.start + t.end) / 2;
+    sc.scrollTo({ left: x(mid) - (sc.clientWidth - nameW) / 2, top: row.offsetTop - sc.clientHeight / 3, behavior: instant || reduce ? "instant" : "smooth" });
+    row.querySelector(".bar")?.classList.add("flash");
+    row.focus({ preventScroll: true });
+    critOf = null;
+    detail(t);
+  };
+  const detail = (t) => {
+    const est = t.minutes;
+    const done = t.role === "done";
+    const progress = done ? (t.end === undefined ? "даты нет" : `закрыт ${whenText(t.end)}`) : `готов к ${whenText(t.end)}`;
+    const span = t.start === undefined ? "" : `${whenText(t.start)} - ${whenText(t.end)}${done && !t.actual && !t.started ? ", начало от оценки" : ""}`;
+    const waits = t.blockedBy.filter((b) => byNumber.has(b)).map((b) => `<button data-fly="${esc(b)}">${esc(b)}</button>`).join(" ");
+    panel.innerHTML = `<button class="x" data-close aria-label="закрыть">x</button>
+      <div class="h"><span class="n">${esc(t.number)}</span> ${esc(t.title)} <span class="st ${t.role}">${ROLE_NAMES[t.role]}</span></div>
+      <div class="facts">${fact("план", minutesText(est), `агент ${minutesText(t.estimate.agent)}, ты ${minutesText(t.estimate.lead)}`)}${fact("факт", t.actual ? minutesText(factOf(t.actual)) : done ? "не измерен" : "ещё нет", t.actual ? `${driftText(factOf(t.actual) - est)} к плану` : "")}${fact(done ? "закрыт" : "прогноз", progress, span)}<div class="fact"><div class="k">критерии</div><div class="v">${t.criteria.done}/${t.criteria.total}</div>${t.criteria.total ? `<button class="crit-open" data-crit>${t.number === critOf ? "скрыть список" : "показать список"}</button>` : ""}</div></div>
+      ${t.number === critOf ? `<ol class="crit">${critList ?? "<li class=\"muted\">читаю файл тикета</li>"}</ol>` : ""}
+      <div class="m">${waits ? `ждёт: ${waits} ` : ""}${esc(t.path)}</div>`;
+    panel.hidden = false;
+  };
+  // Список критериев: файл тикета странице не отдаётся, его читает шторка Roadmap в карточке агента и присылает список.
+  let critOf = null, critList = null;
+  const showCriteria = (t) => {
+    if (critOf === t.number) {
+      critOf = null;
+      return detail(t);
+    }
+    critOf = t.number;
+    critList = parent === window ? '<li class="muted">список виден в Hyperloom, в шторке Roadmap карточки агента</li>' : null;
+    detail(t);
+    if (parent !== window) parent.postMessage({ type: "hyperloom:roadmap-criteria", path: t.path }, "*");
+  };
+  addEventListener("message", (e) => {
+    if (e.source !== parent || e.data?.type !== "hyperloom:roadmap-criteria-list") return;
+    const t = picked && byNumber.get(picked);
+    if (!t || critOf !== t.number || e.data.path !== t.path.replace(/\\/g, "/")) return;
+    const items = Array.isArray(e.data.items) ? e.data.items : null;
+    critList = !items ? '<li class="muted">файл тикета не прочитан</li>'
+      : !items.length ? '<li class="muted">в файле нет строк "- [ ]"</li>'
+      : items.map((c) => `<li class="${c.done ? "ok" : ""}"><i>${c.done ? "x" : " "}</i>${esc(String(c.text))}</li>`).join("");
+    detail(t);
+  });
+  const close = () => {
+    picked = null;
+    panel.hidden = true;
+    draw();
+  };
+  const toggle = (slug) => {
+    if (!expanded.delete(slug)) expanded.add(slug);
+    draw();
+    sheet.querySelector(`.row.cl[data-g="${CSS.escape(slug)}"]`)?.focus({ preventScroll: true });
+  };
+
+  document.querySelector(".zoom").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    if (b.hasAttribute("data-now")) return draw(now);
+    fit = b.dataset.z === "0";
+    pxh = +b.dataset.z || pxh;
+    draw(fit ? from + (to - from) / 2 : undefined);
+  });
+  sheet.addEventListener("click", (e) => {
+    const g = e.target.closest(".row.cl"), r = e.target.closest(".row.tk");
+    if (g) toggle(g.dataset.g);
+    else if (r) fly(r.dataset.t);
+  });
+  sheet.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const g = e.target.closest(".row.cl"), r = e.target.closest(".row.tk");
+    if (!g && !r) return;
+    e.preventDefault();
+    g ? toggle(g.dataset.g) : fly(r.dataset.t);
+  });
+  panel.addEventListener("click", (e) => {
+    if (e.target.closest("[data-close]")) return close();
+    if (e.target.closest("[data-crit]")) return showCriteria(byNumber.get(picked));
+    const b = e.target.closest("[data-fly]");
+    if (b) fly(b.dataset.fly);
+  });
+  addEventListener("keydown", (e) => e.key === "Escape" && picked !== null && close());
+  sc.addEventListener("wheel", (e) => {
+    if (!e.ctrlKey && !e.shiftKey) return;
+    e.preventDefault();
+    if (e.shiftKey) return void (sc.scrollLeft += e.deltaY);
+    const ms = from + ((sc.scrollLeft + e.clientX - nameW) / pxh) * HOUR;
+    fit = false;
+    pxh = Math.min(240, Math.max(0.2, pxh * (e.deltaY < 0 ? 1.25 : 0.8)));
+    draw();
+    sc.scrollLeft = x(ms) - (e.clientX - nameW);
+  }, { passive: false });
+
+  // Поле тянется мышью в любую сторону; сдвиг меньше 4 px считается щелчком.
+  let drag = null;
+  sc.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || e.target.closest("button")) return;
+    drag = { x: e.clientX, y: e.clientY, l: sc.scrollLeft, t: sc.scrollTop, moved: false };
+  });
+  addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+    if (!drag.moved) {
+      drag.moved = true;
+      sc.classList.add("grabbing");
+      tip.style.display = "none";
+    }
+    sc.scrollLeft = drag.l - dx;
+    sc.scrollTop = drag.t - dy;
+  });
+  addEventListener("pointerup", () => {
+    if (drag?.moved) {
+      // Протяжка кончается щелчком по строке под мышью: его съедаем, иначе тикет открывался бы сам.
+      const eat = (e) => e.stopPropagation();
+      addEventListener("click", eat, true);
+      setTimeout(() => removeEventListener("click", eat, true));
+    }
+    drag = null;
+    sc.classList.remove("grabbing");
+  });
+
+  sheet.addEventListener("mousemove", (e) => {
+    const r = drag?.moved ? null : e.target.closest(".row.tk"), t = r && byNumber.get(r.dataset.t);
+    if (!t) return void (tip.style.display = "none");
+    tip.innerHTML = `<div class="h">${esc(t.number)} ${esc(t.title)}</div>
+      <div>${ROLE_NAMES[t.role]}${t.start === undefined ? "" : `: ${whenText(t.start)} - ${whenText(t.end)}`}</div>
+      <div class="m">оценка ${minutesText(t.minutes)} (агент ${minutesText(t.estimate.agent)}, ты ${minutesText(t.estimate.lead)})</div>
+      <div class="m">критерии ${t.criteria.done}/${t.criteria.total}${t.blockedBy.length ? `, ждёт ${t.blockedBy.join(", ")}` : ""}</div>`;
+    tip.style.display = "block";
+    tip.style.left = `${Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8)}px`;
+    tip.style.top = `${Math.min(e.clientY + 14, innerHeight - tip.offsetHeight - 8)}px`;
+  });
+  sheet.addEventListener("mouseleave", () => (tip.style.display = "none"));
+  addEventListener("resize", () => fit && draw());
+
+  // Окно приложения отвечает статусами, которые были на виду при прошлом открытии шторки: разница - новое.
+  addEventListener("message", (e) => {
+    if (e.source !== parent || e.data?.type !== "hyperloom:roadmap-seen") return;
+    const seen = e.data.tickets;
+    fresh = news(data.tickets, seen && typeof seen === "object" ? seen : null);
+    // Скретч с новым раскрывается сам: новое могло лечь в свёрнутый раздел "готово".
+    for (const t of view.tickets) if (fresh.has(t.number)) expanded.add(t.scratch);
+    draw();
+  });
+
+  draw(now);
+  if (location.hash) fly(decodeURIComponent(location.hash.slice(1)), true);
+}
+
+boot();
+</script>
+</body>
+</html>

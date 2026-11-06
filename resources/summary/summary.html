@@ -1,0 +1,940 @@
+<!doctype html>
+<!--
+  Сводка тикета Hyperloom.
+
+  Агент берёт шаблон из %APPDATA%/Hyperloom/summary/summary.html: приложение переписывает его там при
+  каждом запуске. Исходник - resources/summary/summary.html в репозитории Hyperloom.
+
+  Как сделать сводку: скопировать этот файл в <NN>-<slug>.summary.html рядом с файлом тикета и заменить
+  содержимое блока данных своими - это JSON в теге script с id summary-data ближе к концу файла. Остальное
+  не трогать. В блоке сейчас образец. В строках данных вместо "</" писать "<\/", иначе блок закроется
+  раньше времени. Схема ниже нарочно без кавычек у ключей и без самого тега: так поиск первого вхождения
+  ключа или тега находит настоящие данные, а не этот комментарий.
+
+  Данные (в JSON ключи в кавычках):
+  {
+    project: "golosotka",
+    scratch: "golosotka",                                      необязательно
+    ticket: { number: "2", title: "Заголовок тикета", path: "_scratch/<фича>/issues/02-<slug>.md" },
+    checks: [
+      { what: "что проверено", verdict: "pass" | "fail" | "skip", evidence: "чем доказано или почему не сделано" }
+    ],
+    note: "что сделано впрок или заглушкой",                    необязательно
+    findings: [
+      {
+        id: "S2",                             метка из ревью
+        tier: "hard" | "purpose" | "lock",    тяжесть из ревью code-review
+        text: "что нашло ревью",
+        file: "src/x.ts",                     необязательно
+        line: 42,                             необязательно, целое от 1
+        outcome: "fixed" | "left",            поправлено или оставлено
+        diff: "-было\n+стало",                у fixed, необязательно
+        reason: "почему не поправлено"        у left, обязательно
+      }
+    ],
+    questions: [
+      {
+        id: "S3",
+        tier: "hard" | "purpose" | "lock",    необязательно
+        text: "вопрос человеку",
+        options: ["вариант а", "вариант б"],  необязательно, от 2 до 10 строк
+        proposal: 0                           необязательно: номер варианта с 0, что предлагает агент
+      }
+    ],
+    commit: { message: "feat(x): что сделано" }                необязательно
+  }
+  number - строка или число, path необязателен. Нет проверок, находок или вопросов - пустой массив.
+  verdict: pass - прошло, fail - упало, skip - не сделано. Находки - то, что агент решил сам, вопросы - то, что
+  решает человек; одно и то же в оба списка не кладётся.
+  Вопрос с options: человек выбирает вариант буквой и может дописать своё; proposal - номер варианта, страница
+  помечает его на самом варианте, поэтому в text варианты не повторяются. Вопрос без options: человек пишет
+  ответ, proposal тогда - текст предложения агента. Поля severity больше нет, proposal текстом у вопроса с
+  options - ошибка: страница покажет список ошибок вместо сводки.
+
+  Ответ человека приходит агенту текстом: какие оставленные находки всё-таки поправить, какие поправленные
+  откатить (по id), на каждый вопрос выбранный вариант словами с пометкой "(как предложил агент)", если он совпал
+  с proposal, и дописанное строкой "Дополнение"; в конце коммитить ли (если был commit) и, если человек правил
+  сообщение, новое сообщение строками после "Сообщение коммита:". Неотмеченные находки приняты как есть.
+-->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Сводка тикета</title>
+<style>
+  /* Цвета - тёмная тема полотна Hyperloom (src/renderer/src/index.css). Подключить index.css страница не
+     может: браузер-карточка отдаёт ей только её папку, поэтому значения скопированы. Фиолетовое - сделал агент,
+     янтарное - твоё решение, зелёное - готово. Шрифты названы первыми и берутся, если стоят в системе; сеть
+     страница не просит, запасные - системные. */
+  :root {
+    color-scheme: dark;
+    --canvas: #1a1a1a;
+    --surface: #1f1f1f;
+    --raised: #262626;
+    --hover: #2f2f2f;
+    --inset: #161616;
+    --line: #333333;
+    --line-soft: #262626;
+    --text: #ececec;
+    --body: #bdbdbd;
+    --muted: #8f8f8f;
+    --focus: #8ab4ff;
+    --agent: #a98bff;
+    --agent-deep: #241d3d;
+    --lead: #f5b83d;
+    --lead-deep: #30240f;
+    --done: #47d68a;
+    --danger: #ff6b6b;
+    --danger-text: #ffa4a4;
+    --danger-surface: #2c1417;
+    --display: "Unbounded", system-ui, sans-serif;
+    --ui: "Onest", system-ui, sans-serif;
+    --mono: "JetBrains Mono", Consolas, "Cascadia Mono", monospace;
+    --ease: cubic-bezier(.2, .7, .2, 1);
+    --spring: cubic-bezier(.34, 1.56, .64, 1);
+  }
+  * { box-sizing: border-box; }
+  /* Шкала одна на все вкладки: основной текст 14, вторичный 13, метки 11 моноширинным, заголовок тикета 18. */
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--canvas); color: var(--text); font: 14px/1.5 var(--ui); overflow: hidden; -webkit-font-smoothing: antialiased; }
+  button, textarea { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 6px; }
+  /* Колонка во всю высоту карточки: шапка и подвал стоят, прокручивается середина. */
+  main { max-width: 600px; height: 100%; margin: 0 auto; display: flex; flex-direction: column; }
+  .top { flex: none; padding: 16px 16px 0; }
+  .view { flex: 1 1 auto; min-height: 0; overflow: hidden auto; scrollbar-gutter: stable; padding: 2px 16px 16px; }
+  /* minmax(0, 1fr): иначе сообщение коммита без переносов раздвигает колонку, и кнопка отправки уезжает за край. */
+  .foot { flex: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; border-top: 1px solid var(--line); padding: 10px 16px 12px; background: var(--canvas); }
+  .label, .sec, .crumbs, .fh, .tab small, .status, .opt .rec, .foot .lbl { font: 500 11px/1.4 var(--mono); }
+
+  @keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+  @keyframes fromR { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: none; } }
+  @keyframes fromL { from { opacity: 0; transform: translateX(-40px); } to { opacity: 1; transform: none; } }
+  @keyframes pop { 0% { transform: scale(1); } 35% { transform: scale(1.045); } 100% { transform: scale(1); } }
+  @keyframes glow { from { box-shadow: 0 0 0 0 rgba(71, 214, 138, .55); } to { box-shadow: 0 0 0 14px rgba(71, 214, 138, 0); } }
+  @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(169, 139, 255, .6); } 50% { box-shadow: 0 0 0 9px rgba(169, 139, 255, 0); } }
+  @keyframes bump { 0% { transform: translateY(0); } 40% { transform: translateY(-5px); color: var(--lead); } 100% { transform: none; } }
+  @keyframes stamp { 0% { opacity: 0; transform: scale(2.2) rotate(-8deg); } 60% { opacity: 1; transform: scale(.92); } 100% { transform: none; } }
+  @keyframes grow { from { transform: scaleX(0); } }
+  @keyframes barup { from { transform: scaleY(0); } }
+  @keyframes ripple { to { transform: scale(4); opacity: 0; } }
+
+  .crumbs { letter-spacing: .12em; text-transform: uppercase; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .crumbs b { color: var(--text); font-weight: 500; }
+  .crumbs .dot { width: 4px; height: 4px; border-radius: 50%; background: var(--line); }
+  .crumbs .sc { color: var(--agent); }
+  .ttl { margin: 6px 0 0; font: 300 18px/1.3 var(--display); letter-spacing: -.02em; overflow-wrap: anywhere; }
+  .ttl .num { color: var(--lead); margin-right: 8px; }
+
+  .tabs { position: relative; display: flex; gap: 4px; margin: 14px 0 16px; border-bottom: 1px solid var(--line); }
+  .tab { border: 0; background: none; padding: 9px 14px; cursor: pointer; color: var(--muted); transition: color .25s; }
+  .tab:hover { color: var(--body); }
+  .tab.on { color: var(--text); }
+  .tab small { display: inline-block; margin-left: 6px; color: var(--muted); }
+  .tab small.bump { animation: bump .45s var(--spring); }
+  .ind { position: absolute; bottom: -1px; height: 2px; background: var(--lead); border-radius: 2px; transition: left .4s var(--spring), width .4s var(--spring); }
+
+  /* Вход вида каскадом; перерисовка по клику (still) не анимирует то, что уже на экране. */
+  .view > * { animation: rise .45s var(--ease) both; animation-delay: calc(var(--i, 0) * 45ms); }
+  .view.still > * { animation: none; }
+  .view.R > * { animation-name: fromR; }
+  .view.L > * { animation-name: fromL; }
+
+  .sec { letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 4px 0 10px; display: flex; gap: 10px; align-items: center; }
+  .empty { color: var(--muted); }
+
+  .meter { height: 6px; border-radius: 3px; background: var(--raised); overflow: hidden; display: flex; margin-bottom: 14px; }
+  .meter i { display: block; height: 100%; transform-origin: left; animation: grow .9s var(--ease) both; }
+  .meter .pass { background: var(--done); }
+  .meter .skip { background: var(--lead); animation-delay: .5s; }
+  .meter .fail { background: var(--danger); animation-delay: .7s; }
+  .view.still .meter i { animation: none; }
+  .checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+  .checks li { display: grid; grid-template-columns: 78px 1fr; gap: 8px; padding: 5px 10px; border-radius: 6px; background: var(--surface); border-left: 3px solid var(--line); line-height: 1.45; transition: transform .25s var(--ease), background .25s; }
+  .checks li:hover { transform: translateX(4px); background: var(--raised); }
+  .view:not(.still) .checks li { animation: rise .45s var(--ease) both; animation-delay: calc(var(--n) * 70ms); }
+  .checks .v { display: inline-block; font: 600 11px/1.9 var(--mono); }
+  .view:not(.still) .checks .v { animation: stamp .5s var(--spring) both; animation-delay: calc(var(--n) * 70ms + 250ms); }
+  .checks .what { color: var(--text); font-weight: 500; margin-right: 6px; }
+  .checks .ev { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+  /* Строка не выше двух строк, длинное доказательство раскрывает щелчок или Enter. */
+  .checks li { cursor: pointer; }
+  .checks .line { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+  .checks li[aria-expanded="true"] .line { display: block; }
+  .checks .pass { border-color: var(--done); }
+  .checks .pass .v { color: var(--done); }
+  .checks .fail { border-color: var(--danger); }
+  .checks .fail .v { color: var(--danger-text); }
+  .checks .skip { border-color: var(--lead); }
+  .checks .skip .v { color: var(--lead); }
+  .note { color: var(--body); font-size: 13px; margin: 14px 0 0; overflow-wrap: anywhere; }
+
+  .tier { display: inline-flex; align-items: center; gap: 5px; font: 500 11px var(--mono); letter-spacing: 0; text-transform: none; }
+  .tier .bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 11px; }
+  .tier .bars i { width: 3px; border-radius: 1px; background: currentColor; opacity: .25; transform-origin: bottom; }
+  .tier .bars i:nth-child(1) { height: 5px; }
+  .tier .bars i:nth-child(2) { height: 8px; }
+  .tier .bars i:nth-child(3) { height: 11px; }
+  .t-hard { color: var(--danger-text); }
+  .t-hard .bars i { opacity: 1; }
+  .t-purpose { color: var(--lead); }
+  .t-purpose .bars i:nth-child(-n+2) { opacity: 1; }
+  .t-lock { color: var(--muted); }
+  .t-lock .bars i:nth-child(1) { opacity: 1; }
+  .view:not(.still) .tier .bars i { animation: barup .5s var(--spring) both; }
+
+  .find { padding: 11px 13px; border-radius: 10px; background: var(--surface); margin-bottom: 8px; border: 1px solid transparent; transition: transform .25s var(--ease), border-color .25s; }
+  .find:hover { transform: translateY(-2px); border-color: var(--line); }
+  .find.flipped { border-color: var(--lead); }
+  .fh { display: flex; gap: 8px; align-items: center; color: var(--muted); flex-wrap: wrap; }
+  .fh .id { color: var(--text); }
+  .fh .where { overflow-wrap: anywhere; }
+  .tag { padding: 3px 7px; border-radius: 999px; border: 1px solid var(--line); }
+  .tag.fixed { color: var(--agent); border-color: var(--agent); background: var(--agent-deep); }
+  .find p { margin: 6px 0 0; overflow-wrap: anywhere; }
+  .find .why { color: var(--muted); font-size: 13px; }
+  pre.diff { margin: 8px 0 0; padding: 8px 0; background: var(--inset); border-radius: 8px; font: 12px/1.7 var(--mono); color: var(--body); overflow-x: auto; }
+  pre.diff span { display: block; padding: 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .view:not(.still) pre.diff span { animation: fromL .5s var(--ease) both; }
+  .diff .add { color: #8fe8b5; background: rgba(71, 214, 138, .08); }
+  .diff .del { color: #ff9b9b; background: rgba(255, 107, 107, .08); }
+  .diff .hunk { color: var(--muted); }
+
+  .toggle { display: inline-flex; gap: 8px; align-items: center; margin-top: 8px; padding: 0; border: 0; background: none; font-size: 13px; color: var(--body); cursor: pointer; user-select: none; white-space: nowrap; }
+  .toggle:disabled { cursor: default; opacity: .6; }
+  .sw { width: 30px; height: 17px; border-radius: 999px; background: var(--raised); position: relative; transition: background .3s; flex-shrink: 0; }
+  .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 50%; background: var(--muted); transition: transform .35s var(--spring), background .3s; }
+  .toggle.on .sw { background: var(--lead-deep); }
+  .toggle.on .sw::after { transform: translateX(13px); background: var(--lead); }
+
+  .prog { display: flex; gap: 4px; margin-bottom: 10px; }
+  .seg { flex: 1; height: 5px; padding: 0; border: 0; border-radius: 3px; background: var(--raised); position: relative; overflow: hidden; cursor: pointer; transition: transform .2s; }
+  .seg:hover { transform: scaleY(1.8); }
+  .seg::after { content: ""; position: absolute; inset: 0; background: var(--done); transform: scaleX(0); transform-origin: left; transition: transform .5s var(--ease); }
+  .seg.ok::after { transform: scaleX(1); }
+  .seg.cur { background: color-mix(in srgb, var(--lead) 55%, var(--raised)); }
+  .q { padding: 13px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); transition: border-color .35s; }
+  .q.done { border-color: color-mix(in srgb, var(--done) 55%, var(--line)); }
+  .q.just { animation: glow .7s ease-out; }
+  /* Вопрос квиза - тот же размер, что текст находки. */
+  .qt { margin: 0; font: 400 14px/1.5 var(--ui); overflow-wrap: anywhere; }
+  .qt .id { font: 500 11px var(--mono); color: var(--lead); margin-right: 6px; }
+  .proposal { margin: 9px 0 0; padding-left: 10px; border-left: 2px solid var(--agent); color: var(--body); font-size: 13px; overflow-wrap: anywhere; }
+  .proposal b { color: var(--agent); font: 500 11px var(--mono); margin-right: 6px; }
+  .opts { display: grid; gap: 7px; margin-top: 12px; }
+  .opt { position: relative; display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; align-items: center; text-align: left; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--canvas); cursor: pointer; overflow: hidden; transition: border-color .25s, background .25s, transform .3s var(--spring); }
+  .opt:hover:not(:disabled) { border-color: var(--muted); transform: translateX(5px); }
+  .opt:active:not(:disabled) { transform: scale(.98); }
+  .opt:disabled { cursor: default; opacity: .6; }
+  .opt > span:nth-child(2) { overflow-wrap: anywhere; }
+  .opt .key { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; font: 500 12px var(--mono); background: var(--raised); transition: background .25s, color .25s, transform .35s var(--spring); }
+  .opt .rec { color: var(--agent); letter-spacing: .06em; text-transform: uppercase; }
+  .opt.recd { border-color: color-mix(in srgb, var(--agent) 55%, var(--line)); }
+  .opt.sel { border-color: var(--lead); background: var(--lead-deep); }
+  .opt.sel .key { background: var(--lead); color: #241a05; transform: rotate(-8deg) scale(1.1); }
+  .opt.just { animation: pop .4s var(--spring); }
+  .ripple { position: absolute; border-radius: 50%; background: rgba(245, 184, 61, .35); transform: scale(0); animation: ripple .6s ease-out forwards; pointer-events: none; }
+  textarea { display: block; width: 100%; margin-top: 10px; min-height: 60px; resize: vertical; background: var(--inset); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; color: var(--text); transition: border-color .25s, box-shadow .25s; }
+  textarea:focus { border-color: var(--lead); outline: none; box-shadow: 0 0 0 3px var(--lead-deep); }
+  textarea::placeholder { color: var(--muted); }
+  textarea:disabled { opacity: .6; }
+  .nav { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 14px; }
+
+  .foot .bar { display: flex; gap: 10px; align-items: center; }
+  .foot .bar.send { justify-content: flex-end; }
+  .foot .lbl { letter-spacing: .12em; text-transform: uppercase; color: var(--muted); flex: none; }
+  .foot .toggle { margin: 0; }
+  .msgbtn { flex: 1; min-width: 0; text-align: left; border: 1px dashed transparent; background: none; border-radius: 6px; padding: 4px 6px; cursor: pointer; font: 13px var(--mono); color: var(--body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: border-color .2s, background .2s; }
+  .msgbtn:hover:not(:disabled) { border-color: var(--line); background: var(--surface); color: var(--text); }
+  .msgbtn:disabled { cursor: default; }
+  .msgbtn.edited { color: var(--lead); }
+  .msgedit { animation: rise .3s var(--ease) both; }
+  .msgedit textarea { margin-top: 0; min-height: 64px; font: 13px/1.5 var(--mono); }
+  .msgedit .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+  .status { flex: 1; color: var(--muted); }
+  .status--done { color: var(--done); animation: rise .4s var(--ease); }
+  .status--error { color: var(--danger-text); }
+
+  .ghost { border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 5px 12px; cursor: pointer; color: var(--body); transition: transform .25s var(--spring); }
+  .ghost:hover:not(:disabled) { transform: translateY(-2px); color: var(--text); }
+  .ghost:disabled { opacity: .35; cursor: default; }
+  .primary { border: 0; border-radius: 999px; padding: 8px 18px; background: var(--agent); color: #120d22; font-weight: 600; font-size: 13px; cursor: pointer; flex: none; transition: transform .3s var(--spring), background .3s; }
+  .primary:hover:not(:disabled) { transform: translateY(-2px) scale(1.03); }
+  /* Единственная бесконечная анимация страницы: готовая к отправке кнопка, до отправки. */
+  .primary.ready { animation: pulse 1.8s ease-in-out infinite; }
+  .primary:disabled { background: var(--raised); color: var(--muted); cursor: default; }
+
+  .broken { margin: 16px; background: var(--danger-surface); border: 1px solid var(--danger); border-radius: 8px; padding: 12px 16px; overflow: auto; }
+  .broken h1 { font-size: 16px; margin: 0 0 8px; color: var(--danger-text); }
+  .broken li { color: var(--text); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<main id="app"></main>
+<script type="application/json" id="summary-data">
+{
+  "project": "golosotka",
+  "scratch": "golosotka",
+  "ticket": { "number": "2", "title": "Вход через VK ID и Яндекс ID, 18+, блокировка" },
+  "checks": [
+    { "what": "тесты", "verdict": "pass", "evidence": "go test -count=1 ./... дал ok golosotka; go vet и gofmt -l молчат" },
+    { "what": "критерий 1: вход через VK ID и Яндекс ID", "verdict": "pass", "evidence": "Spec-ревью: выполнено в рамках заглушки. TestFirstLoginNeedsAdultCheckbox проходит оба провайдера. В issue не отмечен: настоящего OAuth нет" },
+    { "what": "критерий 2: без галочки 18+ не пускает", "verdict": "pass", "evidence": "Spec-ревью. Без галочки ответ 422 с подсказкой, повторный вход без галочки. Отмечен в issue" },
+    { "what": "критерий 3: заблокированный не входит", "verdict": "pass", "evidence": "Spec-ревью. Отмечен в issue" },
+    { "what": "руками, локальный сервер и curl", "verdict": "pass", "evidence": "/login 200; /login/vk ведёт на /login/age; POST без галочки 422; с галочкой / с \"Выйти\". blocked=1 в базе: старая сессия не работает, повторный вход 403 \"Вход закрыт\"" },
+    { "what": "снимки экранов", "verdict": "skip", "evidence": "не сделаны: headless-хром завис, свои процессы закрыты по PID. /login открыт на полотне, но сервер потом остановлен" }
+  ],
+  "note": "Помощник requireUser сделан, пока его использует только тест. Заглушка: oauthStart и oauthIdentify в auth.go, настоящий VK ID и Яндекс ID заменят только их.",
+  "findings": [
+    {
+      "id": "S2",
+      "tier": "hard",
+      "outcome": "fixed",
+      "text": "Сессия в базе не истекала. Теперь живёт год; TestSessionExpiresAfterAYear упал до правки и прошёл после.",
+      "file": "auth.go",
+      "line": 110,
+      "diff": "-  WHERE s.token = ? AND u.blocked = 0`, c.Value)\n+  WHERE s.token = ? AND u.blocked = 0 AND s.created_at > datetime('now', '-365 days')`, c.Value)"
+    },
+    {
+      "id": "S1",
+      "tier": "hard",
+      "outcome": "left",
+      "text": "Заглушка входа на проде.",
+      "reason": "Ты решил, что в main она не уходит. Spec-ревью: держится только на договорённости не сливать."
+    }
+  ],
+  "questions": [
+    { "id": "S3", "tier": "hard", "text": "У форм выхода и галочки нет CSRF-токена. dev и app для браузера один сайт: страница на dev может отправить форму на app. Обе поддомены наши, выход по чужой форме безвреден.", "options": ["оставить до настоящего входа", "добавить токен сейчас"], "proposal": 0 },
+    { "id": "S4", "tier": "hard", "text": "REFERENCES users(id) в SQLite не работает, пока не включены foreign keys. Сейчас вреда нет, людей никто не удаляет.", "options": ["включить вместе с удалением в админке (#9)", "включить сейчас"], "proposal": 0 },
+    { "id": "S8", "tier": "lock", "text": "В брендбуке нет ширины формы 380px, заголовка 500 22px и нейтральной кнопки \"Выйти\". Правило AGENTS.md: новое значение сначала идёт в брендбук.", "options": ["внести в брендбук с поднятием версии", "подогнать под то, что в брендбуке есть"] },
+    { "id": "S7", "tier": "lock", "text": "Класс .btn повторяет .act из брендбука под другим именем.", "options": ["переименовать в .act", "оставить .btn"] },
+    { "id": "P1", "tier": "purpose", "text": "Кнопку \"Выйти\" тикет не просил.", "options": ["оставить", "убрать"] },
+    { "id": "P2/S6", "tier": "lock", "text": "Сессия создаётся до галочки, а правило \"вошёл = сессия плюс 18+\" записано в двух местах (signedIn и requireUser).", "options": ["свести в одну функцию", "оставить как есть"] },
+    { "id": "S5, S9-S15", "text": "Мелочи: повторы в тестах, литералы cookie, пересказ сигнатур в комментариях.", "options": ["прислать список", "не нужно"] }
+  ],
+  "commit": { "message": "feat: stub login via VK ID and Yandex ID with 18+ step and blocking" }
+}
+</script>
+<script id="summary-logic">
+"use strict";
+
+// Логика страницы. Функции сверху - чистые, их гоняет src/main/summary-template.check.ts; всё, что трогает
+// DOM, живёт в boot и запускается только в браузере.
+
+const VERDICTS = { pass: "PASS", skip: "НЕ СДЕЛАНО", fail: "FAIL" };
+const TIERS = { hard: 3, purpose: 2, lock: 1 };
+const LETTERS = "абвгдежзик";
+const TABS = [["check", "Проверка"], ["findings", "Находки"], ["review", "Ревью"]];
+const ANSWER = "hyperloom:summary-answer";
+const DELIVERED = "hyperloom:summary-delivered";
+const DELIVERY_TIMEOUT_MS = 5000;
+
+const isText = (value) => typeof value === "string" && value.trim() !== "";
+const isObject = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+
+/** Данные сводки из текста блока: { data } или { errors } - что именно не так, по строке на поле. */
+function parseSummary(text) {
+  let raw;
+  try {
+    raw = JSON.parse(text);
+  } catch (error) {
+    return { errors: ["данные не разбираются как JSON: " + error.message] };
+  }
+  if (!isObject(raw)) return { errors: ["данные - не объект"] };
+
+  const errors = [];
+  const need = (value, at, optional) => {
+    if (!(optional && value === undefined) && !isText(value)) errors.push(`${at}: нужна строка`);
+  };
+  const each = (name, check) => {
+    if (!Array.isArray(raw[name])) return errors.push(`${name}: нужен массив`);
+    raw[name].forEach((item, index) => (isObject(item) ? check(item, `${name}[${index}]`) : errors.push(`${name}[${index}]: нужен объект`)));
+  };
+
+  need(raw.project, "project");
+  need(raw.scratch, "scratch", true);
+  const ticket = isObject(raw.ticket) ? raw.ticket : null;
+  const number = typeof ticket?.number === "number" ? String(ticket.number) : ticket?.number;
+  if (!ticket) errors.push("нет ticket");
+  else {
+    if (!isText(number)) errors.push("ticket.number: нужна строка или число");
+    need(ticket.title, "ticket.title");
+    if (ticket.path !== undefined && typeof ticket.path !== "string") errors.push("ticket.path: нужна строка");
+  }
+
+  each("checks", (check, at) => {
+    need(check.what, `${at}.what`);
+    if (!Object.hasOwn(VERDICTS, check.verdict)) errors.push(`${at}.verdict: нужно pass, fail или skip`);
+    need(check.evidence, `${at}.evidence`);
+  });
+  need(raw.note, "note", true);
+
+  each("findings", (finding, at) => {
+    need(finding.id, `${at}.id`);
+    if (finding.severity !== undefined) errors.push(`${at}.severity: поля больше нет, тяжесть - tier`);
+    if (!Object.hasOwn(TIERS, finding.tier)) errors.push(`${at}.tier: нужно hard, purpose или lock`);
+    need(finding.text, `${at}.text`);
+    if (finding.outcome !== "fixed" && finding.outcome !== "left") errors.push(`${at}.outcome: нужно fixed или left`);
+    if (finding.outcome === "left") need(finding.reason, `${at}.reason`);
+    if (finding.file !== undefined && typeof finding.file !== "string") errors.push(`${at}.file: нужна строка`);
+    if (finding.line !== undefined && !(Number.isInteger(finding.line) && finding.line > 0)) errors.push(`${at}.line: нужно целое от 1`);
+    if (finding.diff !== undefined && typeof finding.diff !== "string") errors.push(`${at}.diff: нужна строка`);
+  });
+
+  each("questions", (question, at) => {
+    need(question.id, `${at}.id`);
+    if (question.tier !== undefined && !Object.hasOwn(TIERS, question.tier)) errors.push(`${at}.tier: нужно hard, purpose или lock`);
+    need(question.text, `${at}.text`);
+    const { options, proposal } = question;
+    if (options === undefined) return need(proposal, `${at}.proposal`, true);
+    if (!Array.isArray(options) || options.length < 2 || options.length > LETTERS.length || !options.every(isText)) {
+      errors.push(`${at}.options: нужно от 2 до ${LETTERS.length} строк`);
+    } else if (typeof proposal === "string") errors.push(`${at}.proposal: у вопроса с options нужен номер варианта с 0`);
+    else if (proposal !== undefined && !(Number.isInteger(proposal) && proposal >= 0 && proposal < options.length)) {
+      errors.push(`${at}.proposal: нет варианта с номером ${proposal}`);
+    }
+  });
+
+  if (raw.commit !== undefined) {
+    if (!isObject(raw.commit)) errors.push("commit: нужен объект");
+    else need(raw.commit.message, "commit.message");
+  }
+
+  if (errors.length) return { errors };
+  return {
+    data: {
+      project: raw.project,
+      scratch: raw.scratch,
+      ticket: { number, title: ticket.title, path: ticket.path },
+      checks: raw.checks,
+      note: raw.note,
+      findings: raw.findings,
+      questions: raw.questions,
+      commit: raw.commit,
+    },
+  };
+}
+
+function counts(data) {
+  const verdict = (name) => data.checks.filter((check) => check.verdict === name).length;
+  const fixed = data.findings.filter((finding) => finding.outcome === "fixed").length;
+  return { pass: verdict("pass"), skip: verdict("skip"), fail: verdict("fail"), fixed, left: data.findings.length - fixed, questions: data.questions.length };
+}
+
+/** Есть вопросы - сводка открывается на Ревью, где нужен человек, нет - на Проверке. */
+function initialTab(data) {
+  return data.questions.length ? "review" : "check";
+}
+
+/** Шаги квиза - только вопросы. */
+function quizSteps(data) {
+  return data.questions.map((_, index) => ({ key: `q${index + 1}`, index }));
+}
+
+/** Черновик: flip - места находок, где решение агента развёрнуто; pick - номер варианта по месту вопроса (null -
+ *  не выбран); own - свой ответ или дополнение по месту вопроса; commit - "закоммитить"; msg - правленое сообщение
+ *  коммита (null - предложенное); step - открытый вопрос квиза; sent - ответ доставлен. */
+function emptyDraft() {
+  return { flip: [], pick: [], own: [], commit: true, msg: null, step: 0, sent: false };
+}
+
+/** Черновик из хранилища; чужое или битое значение - пустой черновик, а не ошибка. */
+function readDraft(stored) {
+  try {
+    const draft = JSON.parse(stored);
+    if (!isObject(draft) || !Array.isArray(draft.flip)) return emptyDraft();
+    const list = (value, keep) => (Array.isArray(value) ? value.map(keep) : []);
+    return {
+      flip: draft.flip.filter((index) => Number.isInteger(index) && index >= 0),
+      pick: list(draft.pick, (index) => (Number.isInteger(index) && index >= 0 ? index : null)),
+      own: list(draft.own, (text) => (typeof text === "string" ? text : "")),
+      commit: draft.commit !== false,
+      msg: typeof draft.msg === "string" ? draft.msg : null,
+      step: Number.isInteger(draft.step) && draft.step >= 0 ? draft.step : 0,
+      sent: draft.sent === true,
+    };
+  } catch {
+    return emptyDraft();
+  }
+}
+
+/** Ключ черновика: путь страницы плюс отпечаток данных. Переписанная сводка - новый ключ и чистая форма. */
+function draftKey(pathname, text) {
+  // FNV-1a: отпечатку нужна только разница между версиями данных, а не стойкость.
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index++) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `hyperloom:summary:${pathname}:${(hash >>> 0).toString(16)}`;
+}
+
+/** На вопрос ответили: выбран вариант или написан свой ответ. */
+function answered(draft, index) {
+  return Number.isInteger(draft.pick[index]) || isText(draft.own[index]);
+}
+
+function pending(data, draft) {
+  return data.questions.filter((_, index) => !answered(draft, index)).length;
+}
+
+/** Отправить можно, пока не отправлено и у каждого вопроса есть ответ. */
+function canSend(data, draft) {
+  return !draft.sent && pending(data, draft) === 0;
+}
+
+/** Сообщение правили: не пустое и не то, что предложил агент. */
+function msgEdited(data, draft) {
+  return !!data.commit && isText(draft.msg) && draft.msg.trim() !== data.commit.message.trim();
+}
+
+/** Текст ответа агенту: развороты находок по id, ответ на каждый вопрос (вариант словами, пометка согласия,
+ *  дополнение), решение по коммиту и правленое сообщение. */
+function answerText(data, draft) {
+  const flipped = (outcome) =>
+    data.findings.filter((finding, index) => finding.outcome === outcome && draft.flip.includes(index)).map((finding) => `- ${finding.id}: ${finding.text}`);
+  const fix = flipped("left");
+  const revert = flipped("fixed");
+
+  const lines = [`Ответ на сводку тикета ${data.ticket.number} "${data.ticket.title}".`];
+  if (fix.length) lines.push("", "Поправить, хотя ты оставил:", ...fix);
+  if (revert.length) lines.push("", "Откатить:", ...revert);
+  if (data.findings.length) lines.push("", fix.length || revert.length ? "Остальные находки - как есть." : "Все находки - как есть.");
+  data.questions.forEach((question, index) => {
+    const pick = draft.pick[index];
+    const own = (draft.own[index] ?? "").trim();
+    lines.push("", `Вопрос ${question.id}: ${question.text}`);
+    if (question.options && Number.isInteger(pick) && pick < question.options.length) {
+      lines.push(`Ответ: ${LETTERS[pick]}) ${question.options[pick]}${pick === question.proposal ? " (как предложил агент)" : ""}`);
+      if (own) lines.push(`Дополнение: ${own}`);
+    } else lines.push(`Ответ: ${own}`);
+  });
+  if (data.commit) {
+    lines.push("", draft.commit ? "Коммит: закоммить." : "Коммит: пока не коммитить.");
+    if (draft.commit && msgEdited(data, draft)) lines.push("Сообщение коммита:", draft.msg.trim());
+  }
+  return lines.join("\n");
+}
+
+/** Вкладки Проверка, Находки, Ревью; шапка и подвал с коммитом стоят, середина прокручивается. Решения лежат в
+ *  черновике - карточку можно закрыть и открыть на том же месте. Фокус страница берёт только после действия
+ *  рукой: открылась она сама, пока человек печатал агенту, и перехватывать его ввод ей нельзя. */
+function boot() {
+  const app = document.getElementById("app");
+  const source = document.getElementById("summary-data").textContent;
+  const parsed = parseSummary(source);
+  if (parsed.errors) return showBroken(app, parsed.errors);
+
+  const data = parsed.data;
+  const total = counts(data);
+  const key = draftKey(location.pathname, source);
+  const standalone = window.parent === window;
+  let draft = emptyDraft();
+  try {
+    draft = readDraft(localStorage.getItem(key));
+  } catch {}
+  draft.step = Math.min(draft.step, Math.max(0, data.questions.length - 1));
+  const save = () => {
+    try {
+      localStorage.setItem(key, JSON.stringify(draft));
+    } catch {}
+  };
+
+  let tab = initialTab(data);
+  let lastTab = null;
+  let editing = false;
+  let waiting = null;
+  let error = "";
+  // Узлы текущей отрисовки, которые refresh правит без перерисовки.
+  let ui = {};
+
+  document.title = `Тикет ${data.ticket.number}: сводка`;
+
+  const tierView = (tier) =>
+    tier ? el("span", { class: `tier t-${tier}`, "aria-label": `тяжесть: ${tier}` }, el("span", { class: "bars" }, el("i", {}), el("i", {}), el("i", {})), tier) : null;
+  const toggle = (on, label, flip) =>
+    el("button", { type: "button", class: `toggle${on ? " on" : ""}`, role: "switch", "aria-checked": String(on), disabled: draft.sent, onclick: flip }, el("span", { class: "sw" }), label);
+
+  const header = (fx) => {
+    const tabs = el("div", { class: "tabs", role: "tablist" });
+    const tally = { check: `${total.pass}/${data.checks.length}`, findings: String(data.findings.length), review: "" };
+    for (const [name, label] of TABS) {
+      const small = el("small", { class: name === "review" && fx.bump ? "bump" : "" }, tally[name]);
+      if (name === "review") ui.count = small;
+      const button = el("button", { type: "button", class: `tab${tab === name ? " on" : ""}`, role: "tab", "aria-selected": String(tab === name), "data-tab": name, onclick: () => show(name) }, label, small);
+      tabs.append(button);
+    }
+    ui.ind = el("span", { class: "ind" });
+    ui.tabs = tabs;
+    tabs.append(ui.ind);
+    const crumbs = el("div", { class: "crumbs" }, el("b", {}, data.project));
+    if (data.scratch) crumbs.append(el("span", { class: "dot" }), "скретч", el("span", { class: "sc" }, data.scratch));
+    return el("header", { class: "top" }, crumbs, el("h1", { class: "ttl" }, el("span", { class: "num" }, `#${data.ticket.number}`), data.ticket.title), tabs);
+  };
+
+  const checkTab = () => {
+    if (!data.checks.length) return [el("p", { class: "empty" }, "Агент не перечислил проверок."), data.note ? el("p", { class: "note" }, data.note) : null];
+    const share = (count) => `width:${(count / data.checks.length) * 100}%`;
+    return [
+      el(
+        "div",
+        { class: "meter", role: "img", "aria-label": `PASS ${total.pass}, не сделано ${total.skip}, FAIL ${total.fail}` },
+        el("i", { class: "pass", style: share(total.pass) }),
+        el("i", { class: "skip", style: share(total.skip) }),
+        el("i", { class: "fail", style: share(total.fail) }),
+      ),
+      el(
+        "ul",
+        { class: "checks" },
+        ...data.checks.map((check, index) =>
+          el(
+            "li",
+            {
+              class: check.verdict,
+              style: `--n:${index}`,
+              tabindex: "0",
+              "aria-expanded": "false",
+              onclick: (event) => expand(event.currentTarget),
+              onkeydown: (event) => event.key === "Enter" && expand(event.currentTarget),
+            },
+            el("span", {}, el("span", { class: "v" }, VERDICTS[check.verdict])),
+            el("div", { class: "line" }, el("span", { class: "what" }, check.what), el("span", { class: "ev" }, check.evidence)),
+          ),
+        ),
+      ),
+      data.note ? el("p", { class: "note" }, data.note) : null,
+    ];
+  };
+
+  const findingsTab = () => {
+    if (!data.findings.length) return [el("p", { class: "empty" }, "Находок нет.")];
+    return data.findings.map((finding, index) => {
+      const fixed = finding.outcome === "fixed";
+      const flipped = draft.flip.includes(index);
+      return el(
+        "article",
+        { class: `find${flipped ? " flipped" : ""}` },
+        el(
+          "div",
+          { class: "fh" },
+          el("span", { class: "id" }, finding.id),
+          tierView(finding.tier),
+          el("span", { class: `tag ${finding.outcome}` }, fixed ? "исправлено" : "оставлено"),
+          finding.file ? el("span", { class: "where" }, finding.line ? `${finding.file}:${finding.line}` : finding.file) : null,
+        ),
+        el("p", {}, finding.text),
+        fixed && finding.diff ? diff(finding.diff) : null,
+        fixed ? null : el("p", { class: "why" }, finding.reason),
+        toggle(flipped, fixed ? "откатить" : "поправить", () => {
+          draft.flip = flipped ? draft.flip.filter((other) => other !== index) : [...draft.flip, index];
+          save();
+          render({ enter: false });
+        }),
+      );
+    });
+  };
+
+  const reviewTab = (fx) => {
+    if (!data.questions.length) return [el("p", { class: "empty" }, "Вопросов нет.")];
+    const index = draft.step;
+    const question = data.questions[index];
+    ui.segs = quizSteps(data).map((_, at) =>
+      el("button", { type: "button", class: `seg${at === index ? " cur" : ""}`, "aria-label": `Вопрос ${data.questions[at].id}`, onclick: () => step(at) }),
+    );
+    const own = el("textarea", {
+      class: "own",
+      rows: "3",
+      placeholder: question.options ? "Свой ответ или дополнение" : "Твой ответ",
+      "aria-label": `Ответ на вопрос ${question.id}`,
+      disabled: draft.sent,
+      oninput: () => {
+        const was = answered(draft, index);
+        draft.own[index] = own.value;
+        error = "";
+        save();
+        refresh();
+        if (!was && answered(draft, index)) flash();
+      },
+    });
+    own.value = draft.own[index] ?? "";
+    const options = question.options
+      ? el(
+          "div",
+          { class: "opts", role: "radiogroup", "aria-label": `Варианты ответа на ${question.id}` },
+          ...question.options.map((option, at) => {
+            const selected = draft.pick[index] === at;
+            const proposed = question.proposal === at;
+            return el(
+              "button",
+              {
+                type: "button",
+                class: `opt${selected ? " sel" : ""}${proposed ? " recd" : ""}${fx.opt === at ? " just" : ""}`,
+                role: "radio",
+                "aria-checked": String(selected),
+                disabled: draft.sent,
+                onpointerdown: ripple,
+                onclick: () => pick(at),
+              },
+              el("span", { class: "key" }, LETTERS[at]),
+              el("span", {}, option),
+              proposed ? el("span", { class: "rec" }, "предлагает агент") : el("span", {}),
+            );
+          }),
+        )
+      : null;
+    ui.q = el(
+      "div",
+      { class: `q${answered(draft, index) ? " done" : ""}${fx.just ? " just" : ""}` },
+      el("h2", { class: "qt" }, el("span", { class: "id" }, question.id), question.text),
+      !question.options && question.proposal ? el("p", { class: "proposal" }, el("b", {}, "предлагает агент"), question.proposal) : null,
+      options,
+      own,
+    );
+    ui.tally = el("span", { class: "status" });
+    return [
+      el("div", { class: "prog" }, ...ui.segs),
+      el("div", { class: "sec" }, `вопрос ${index + 1} из ${data.questions.length}`, tierView(question.tier)),
+      ui.q,
+      el(
+        "div",
+        { class: "nav" },
+        el("button", { type: "button", class: "ghost", disabled: index === 0, onclick: () => step(index - 1) }, "назад"),
+        ui.tally,
+        el("button", { type: "button", class: "ghost", disabled: index === data.questions.length - 1, onclick: () => step(index + 1) }, "дальше"),
+      ),
+    ];
+  };
+
+  const footer = (fx) => {
+    const parts = [];
+    if (data.commit) {
+      if (editing) {
+        ui.area = el("textarea", {
+          "aria-label": "Сообщение коммита",
+          oninput: () => {
+            draft.msg = ui.area.value;
+            save();
+            refresh();
+          },
+        });
+        ui.area.value = draft.msg ?? data.commit.message;
+        const back = el("button", { type: "button", class: "ghost", onclick: () => ((draft.msg = null), save(), (editing = false), render({ enter: false })) }, "как было");
+        const done = el("button", { type: "button", class: "ghost", onclick: () => ((editing = false), render({ enter: false })) }, "готово");
+        parts.push(el("div", { class: "msgedit" }, ui.area, el("div", { class: "row" }, back, done)));
+      }
+      ui.msg = el("button", {
+        type: "button",
+        class: "msgbtn",
+        "aria-expanded": String(editing),
+        "aria-label": "Сообщение коммита: посмотреть и поправить",
+        disabled: draft.sent,
+        onclick: () => ((editing = !editing), render({ enter: false, focusMsg: editing })),
+      });
+      const commit = toggle(draft.commit, "закоммитить", () => ((draft.commit = !draft.commit), save(), render({ enter: false })));
+      parts.push(el("div", { class: "bar" }, el("span", { class: "lbl" }, "коммит"), ui.msg, commit));
+    }
+    ui.status = el("span", { class: "status", role: "status", "aria-live": "polite" });
+    ui.send = el("button", { type: "button", class: "primary", onclick: submit });
+    parts.push(el("div", { class: "bar send" }, ui.status, ui.send));
+    return el("footer", { class: "foot" }, ...parts);
+  };
+
+  // Перерисовка по клику (enter: false) сохраняет прокрутку середины и не повторяет вход списка.
+  function render(fx = {}) {
+    fx = { enter: true, dir: "", just: false, opt: null, bump: false, focusMsg: false, ...fx };
+    const keep = ui.view?.scrollTop ?? 0;
+    ui = {};
+    const parts = tab === "check" ? checkTab() : tab === "findings" ? findingsTab() : reviewTab(fx);
+    const view = el("div", { class: `view${fx.enter ? "" : " still"}${fx.dir ? ` ${fx.dir}` : ""}`, role: "tabpanel" }, ...parts);
+    [...view.children].forEach((child, index) => child.style.setProperty("--i", index));
+    app.replaceChildren(header(fx), view, footer(fx));
+    ui.view = view;
+    // refresh до прокрутки: пустой подвал ниже готового, и середина обрезала бы прокрутку по своей высоте.
+    refresh();
+    if (!fx.enter) view.scrollTop = keep;
+    if (fx.focusMsg) ui.area?.focus();
+    slide();
+  }
+
+  // Полоска под вкладкой едет от прежней вкладки к новой.
+  function slide() {
+    const place = (name) => {
+      const button = ui.tabs.querySelector(`[data-tab="${name}"]`);
+      return `left:${button.offsetLeft}px;width:${button.offsetWidth}px`;
+    };
+    // Чтение offsetWidth фиксирует прежнее место без перехода, и следующая запись уже едет.
+    ui.ind.style.cssText = `${place(lastTab ?? tab)};transition:none`;
+    void ui.ind.offsetWidth;
+    ui.ind.style.cssText = place(tab);
+    lastTab = tab;
+  }
+
+  function refresh() {
+    const wait = pending(data, draft);
+    ui.count.textContent = data.questions.length ? `${wait} из ${data.questions.length} ждут` : "0";
+    ui.segs?.forEach((seg, index) => seg.classList.toggle("ok", answered(draft, index)));
+    ui.q?.classList.toggle("done", answered(draft, draft.step));
+    if (ui.tally) ui.tally.textContent = `${data.questions.length - wait} из ${data.questions.length} отвечено`;
+    if (ui.msg) {
+      ui.msg.textContent = isText(draft.msg) ? draft.msg : data.commit.message;
+      ui.msg.classList.toggle("edited", msgEdited(data, draft));
+    }
+    const ready = !standalone && waiting === null && canSend(data, draft);
+    ui.send.disabled = !ready;
+    ui.send.classList.toggle("ready", ready);
+    ui.send.textContent = draft.sent ? "Отправлено" : "Отправить агенту";
+    let text = "";
+    let tone = "";
+    if (draft.sent) [text, tone] = ["Отправлено агенту.", "done"];
+    else if (error) [text, tone] = [error, "error"];
+    else if (standalone) text = "Отправка работает только в карточке Hyperloom.";
+    else if (waiting !== null) text = "Отправляю...";
+    else if (wait) text = `Ждут ответа: ${plural(wait, "вопрос", "вопроса", "вопросов")}.`;
+    ui.status.textContent = text;
+    ui.status.className = `status${tone ? ` status--${tone}` : ""}`;
+  }
+
+  // Вспышка вопроса, на который только что ответили.
+  function flash() {
+    ui.q.classList.remove("just");
+    void ui.q.offsetWidth;
+    ui.q.classList.add("just");
+  }
+
+  function show(name) {
+    if (name === tab) return;
+    const order = (value) => TABS.findIndex(([other]) => other === value);
+    const dir = order(name) > order(tab) ? "R" : "L";
+    tab = name;
+    render({ dir });
+  }
+
+  function step(to) {
+    if (to < 0 || to >= data.questions.length || to === draft.step) return;
+    const dir = to > draft.step ? "R" : "L";
+    draft.step = to;
+    save();
+    render({ dir });
+    ui.view.querySelector(".opt.sel, .opt, textarea")?.focus({ preventScroll: true });
+  }
+
+  // Повторный выбор того же варианта снимает выбор.
+  function pick(at) {
+    const index = draft.step;
+    const question = data.questions[index];
+    if (draft.sent || tab !== "review" || !question?.options || at >= question.options.length) return;
+    const was = answered(draft, index);
+    draft.pick[index] = draft.pick[index] === at ? null : at;
+    error = "";
+    save();
+    render({ enter: false, opt: at, just: !was && answered(draft, index), bump: true });
+    ui.view.querySelectorAll(".opt")[at]?.focus({ preventScroll: true });
+  }
+
+  function submit() {
+    if (standalone || waiting !== null || !canSend(data, draft)) return;
+    error = "";
+    waiting = setTimeout(() => {
+      waiting = null;
+      error = "Не доставлено: карточка не ответила за 5 секунд.";
+      refresh();
+    }, DELIVERY_TIMEOUT_MS);
+    refresh();
+    window.parent.postMessage({ type: ANSWER, ticket: data.ticket.number, text: answerText(data, draft) }, "*");
+  }
+
+  window.addEventListener("message", (event) => {
+    if (event.source !== window.parent || event.data?.type !== DELIVERED || waiting === null) return;
+    clearTimeout(waiting);
+    waiting = null;
+    if (event.data.ok === true) {
+      draft.sent = true;
+      editing = false;
+      save();
+      render({ enter: false });
+    } else {
+      const reason = typeof event.data.error === "string" && event.data.error ? event.data.error : "без объяснения";
+      error = `Не доставлено: ${reason}.`;
+      refresh();
+    }
+  });
+
+  // Клавиши на Ревью: буква или цифра варианта - выбор, из поля ответа Ctrl+Enter - следующий вопрос. Стрелки
+  // страница не трогает.
+  document.addEventListener("keydown", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (tab !== "review") return;
+    if (target?.closest("textarea, input")) {
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && target.closest(".q")) {
+        event.preventDefault();
+        step(draft.step + 1);
+      }
+      return;
+    }
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    const letter = LETTERS.indexOf(event.key.toLowerCase());
+    const at = letter >= 0 ? letter : /^[1-9]$/.test(event.key) ? Number(event.key) - 1 : -1;
+    if (at >= 0) pick(at);
+  });
+
+  render();
+}
+
+function showBroken(app, errors) {
+  app.append(
+    el(
+      "div",
+      { class: "broken", role: "alert" },
+      el("h1", {}, "Сводка не открылась: данные с ошибкой"),
+      el("ul", {}, ...errors.map((error) => el("li", {}, error))),
+    ),
+  );
+}
+
+/** Русское число: 1 вопрос, 2 вопроса, 5 вопросов. */
+function plural(n, one, few, many) {
+  const tens = n % 100;
+  const ones = n % 10;
+  return `${n} ${tens >= 11 && tens <= 14 ? many : ones === 1 ? one : ones >= 2 && ones <= 4 ? few : many}`;
+}
+
+function diff(text) {
+  const tone = (line) => (line.startsWith("@@") ? "hunk" : line.startsWith("+") ? "add" : line.startsWith("-") ? "del" : "");
+  return el("pre", { class: "diff" }, ...text.split("\n").map((line) => el("span", { class: tone(line) }, line)));
+}
+
+function expand(row) {
+  row.setAttribute("aria-expanded", String(row.getAttribute("aria-expanded") !== "true"));
+}
+
+// Волна от точки нажатия на варианте.
+function ripple(event) {
+  const button = event.currentTarget;
+  const box = button.getBoundingClientRect();
+  const size = Math.max(box.width, box.height);
+  const wave = el("span", { class: "ripple", style: `width:${size}px;height:${size}px;left:${event.clientX - box.left - size / 2}px;top:${event.clientY - box.top - size / 2}px` });
+  button.append(wave);
+  setTimeout(() => wave.remove(), 700);
+}
+
+/** Узел с атрибутами и детьми. Атрибут-функция on* - обработчик, false и null - нет атрибута. Текст ставится как
+ *  текст: данные пишет агент, разметкой они не станут. */
+function el(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  for (const [name, value] of Object.entries(attrs)) {
+    if (typeof value === "function") node.addEventListener(name.slice(2), value);
+    else if (value === true) node.setAttribute(name, "");
+    else if (value !== false && value !== null && value !== undefined) node.setAttribute(name, value);
+  }
+  node.append(...children.filter((child) => child !== null && child !== undefined && child !== ""));
+  return node;
+}
+
+if (typeof document !== "undefined") boot();
+</script>
+</body>
+</html>

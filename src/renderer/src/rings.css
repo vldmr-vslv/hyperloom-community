@@ -1,0 +1,1145 @@
+/* Круглое полотно (тёмная тема, _scratch/root-dial): кольца папок и корня, ветка, веера, табличка корня, водопад и
+   плита "керамика Atlas" у остальных карточек. Классы ставятся только на круглом полотне, поэтому другие темы этот
+   лист не задевает. Цвета - тёмной керамики из прототипа. */
+
+/* ---------- кольцо ---------- */
+
+/* Узел кольца ловит мышь только нарисованным: прозрачные углы квадрата пропускают щелчок к полотну. React Flow
+   ставит узлу pointer-events: all прямо в style, перебить его можно только так. */
+.react-flow .react-flow__node:has(> .ring) {
+  border-radius: 50%;
+  pointer-events: none !important;
+}
+
+/* Ручки стрелок у кольца не видны: связь входит в обод, а не в точку на краю квадрата. */
+.react-flow__node:has(> .ring) .react-flow__handle {
+  opacity: 0;
+}
+
+.ring {
+  position: relative;
+  color: #ececea;
+  font-family: var(--font-ui);
+  pointer-events: none;
+}
+
+.react-flow__node.blurred .ring {
+  filter: blur(var(--blur-unfocused));
+}
+
+.ring__svg {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.ring__svg > * {
+  pointer-events: visiblePainted;
+}
+
+.ring__frame,
+.ring__core {
+  cursor: grab;
+}
+
+.ring__seg,
+.ring__act,
+.ring__band,
+.ring__plate,
+.fan__item {
+  cursor: pointer;
+}
+
+.ring__engrave {
+  font: 7.5px var(--font-mono);
+  letter-spacing: 0.16em;
+  fill: #6a6966;
+}
+
+.ring__engrave--lit {
+  fill: #e8ecf4;
+}
+
+.ring__count {
+  font-weight: 700;
+  fill: #ececea;
+}
+
+.ring__name {
+  font-weight: 600;
+  fill: #8a8a88;
+}
+
+.ring__name--open {
+  fill: #f3f3f3;
+}
+
+.ring__seg:hover .ring__name {
+  fill: #f3f3f3;
+}
+
+.ring__kind {
+  font: 600 8px var(--font-mono);
+  letter-spacing: 0.22em;
+  fill: #777;
+}
+
+.ring__title {
+  font: 700 17px var(--font-ui);
+  letter-spacing: -0.01em;
+  fill: #f1f1f1;
+}
+
+.ring__age {
+  font: 8px var(--font-mono);
+  fill: #6f6f6c;
+}
+
+.ring__act-bg {
+  fill: #141413;
+  transition: fill 0.15s;
+}
+
+.ring__act:hover .ring__act-bg {
+  fill: #262624;
+}
+
+.ring__act-bg--on {
+  fill: #2a2a28;
+}
+
+.ring__num {
+  font: 700 11px var(--font-ui);
+  fill: #ececea;
+}
+
+.ring__num--files {
+  fill: #b5b5b2;
+}
+
+/* Части кольца двигаются вокруг его середины: начало координат SVG - середина кольца. */
+.ring__frame,
+.ring__win,
+.ring__core,
+.ring__wave {
+  transform-box: view-box;
+  transform-origin: 0 0;
+}
+
+/* Импульс: кольцо выстреливает из точки с перелётом, по нему проходит волна, окна и середина мигают. */
+.ring--born .ring__frame {
+  animation: ring-pop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.ring__wave {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ring--born .ring__wave {
+  animation: ring-wave 0.55s 0.2s ease-out both;
+}
+
+.ring--born .ring__win {
+  animation: ring-win 0.45s calc(0.15s + var(--i) * 30ms) both;
+}
+
+.ring--born .ring__core {
+  animation: ring-flick 0.45s 0.55s steps(1, end) both;
+}
+
+/* Закрытие - тот же ход обратно. */
+.ring--dying .ring__frame {
+  animation: ring-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) reverse both;
+}
+
+.ring--dying .ring__win,
+.ring--dying .ring__core,
+.ring--dying .ring__deco,
+.ring--dying .branch,
+.ring--dying .root-tag {
+  animation: ring-flick 0.35s steps(1, end) reverse both;
+}
+
+@keyframes ring-pop {
+  from {
+    transform: scale(0.001);
+    opacity: 0;
+  }
+  22% {
+    opacity: 1;
+  }
+}
+
+@keyframes ring-wave {
+  from {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  to {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+@keyframes ring-win {
+  0% {
+    transform: scale(0.001);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.9;
+  }
+  30% {
+    opacity: 0;
+  }
+  45% {
+    transform: scale(1.12);
+    opacity: 1;
+  }
+  60% {
+    opacity: 0.5;
+  }
+  75%,
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@keyframes ring-flick {
+  0% {
+    opacity: 0;
+  }
+  14% {
+    opacity: 0.9;
+  }
+  28% {
+    opacity: 0;
+  }
+  42% {
+    opacity: 1;
+  }
+  58% {
+    opacity: 0.4;
+  }
+  72%,
+  100% {
+    opacity: 1;
+  }
+}
+
+/* Декор корня крутит композитор: два кольца делений, 10 шагов в секунду - шаг не виден, слой сводится реже. */
+.ring__deco {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  pointer-events: none;
+}
+
+.ring__deco > div {
+  position: absolute;
+  left: 0;
+  top: 0;
+  will-change: transform;
+}
+
+.ring__deco svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.ring__deco-a {
+  animation: deco-turn 144s steps(1440) infinite;
+}
+
+.ring__deco-b {
+  animation: deco-turn 225s steps(2250) infinite reverse;
+}
+
+@keyframes deco-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------- веера у кромки ---------- */
+
+.fan__in {
+  animation: ring-flick 0.5s steps(1, end) both;
+  animation-delay: var(--d);
+}
+
+.fan__plate {
+  fill: #252523;
+}
+
+.fan__item:hover .fan__plate {
+  fill: #33332f;
+}
+
+.fan__text {
+  font: 600 7px var(--font-mono);
+  letter-spacing: 0.14em;
+  fill: #9a9a97;
+}
+
+.fan__letter {
+  font: 700 8px var(--font-mono);
+  fill: #ececea;
+}
+
+.fan__color {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+}
+
+/* ---------- ветка списком, "керамика" ---------- */
+
+.branch__wires {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+/* Плита встаёт за ободом у сегмента: справа от него растёт вправо, слева - влево; по высоте - не выше 30 px над ним. */
+.branch {
+  position: absolute;
+  z-index: 2;
+  width: 210px;
+  padding: 4px 4px 6px;
+  border-radius: 3px;
+  background: linear-gradient(135deg, #31312f, #1f1f1e 50%, #121211);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.22),
+    0 18px 34px -16px rgb(0 0 0 / 0.85);
+  color: #ececea;
+  pointer-events: auto;
+  transform: translateY(max(-50%, -30px));
+  cursor: default;
+}
+
+.branch--left {
+  transform: translate(-100%, max(-50%, -30px));
+}
+
+.branch__head {
+  padding: 5px 6px 6px;
+  font: 600 7.5px var(--font-mono);
+  letter-spacing: 0.16em;
+  color: #8a8a87;
+}
+
+.branch__row {
+  all: unset;
+  position: relative;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  height: 17px;
+  padding: 0 6px 0 calc(4px + var(--depth) * 14px);
+  border-radius: 2px;
+  font: 600 10px var(--font-ui);
+  color: #ececea;
+  cursor: pointer;
+}
+
+.branch__row:hover,
+.branch__row--open {
+  background: rgb(255 255 255 / 0.06);
+}
+
+.branch__row--open {
+  font-weight: 700;
+}
+
+.branch__row--file {
+  font-weight: 400;
+  color: #cfcfcc;
+}
+
+/* Линия уровня у вложенной строки: от строки родителя вниз и к своей строке. */
+.branch__row--deep::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--depth) * 14px - 3px);
+  top: 0;
+  width: 5px;
+  height: 50%;
+  border-left: 1px solid #3a3a38;
+  border-bottom: 1px solid #3a3a38;
+}
+
+.branch__ico {
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+
+.branch__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.branch__meta {
+  flex: none;
+  font: 8px var(--font-mono);
+  color: #5f5f5d;
+}
+
+/* Значок "своим кольцом" у строки подпапки: по наведению, поверх давности. */
+.branch__item {
+  position: relative;
+}
+
+.branch__ring {
+  all: unset;
+  position: absolute;
+  top: 1px;
+  right: 3px;
+  display: none;
+  align-items: center;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 2px;
+  background: #2a2a28;
+  color: #cfcfcc;
+  cursor: pointer;
+  --icon-size: 11px;
+}
+
+.branch__row:hover + .branch__ring,
+.branch__ring:hover {
+  display: flex;
+}
+
+.branch__ring:hover {
+  background: var(--pc);
+  color: #141413;
+}
+
+.branch__note {
+  padding: 2px 6px 2px calc(26px + var(--depth) * 14px);
+  font: 9px var(--font-mono);
+  color: #5f5f5d;
+}
+
+/* ---------- табличка корня ---------- */
+
+.root-link {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.root-link--on {
+  opacity: 1;
+  animation: link-flick 0.8s steps(1, end) both;
+}
+
+.root-link--on .root-link__main {
+  stroke-dasharray: 700;
+  animation: link-draw 0.5s ease-out both;
+}
+
+.root-link--off {
+  animation: tag-flick-out 0.5s steps(1, end) both;
+}
+
+@keyframes link-draw {
+  from {
+    stroke-dashoffset: 700;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes link-flick {
+  0% {
+    opacity: 1;
+  }
+  18% {
+    opacity: 0.2;
+  }
+  26% {
+    opacity: 1;
+  }
+  40% {
+    opacity: 0.5;
+  }
+  52%,
+  100% {
+    opacity: 1;
+  }
+}
+
+.root-tag {
+  position: absolute;
+  z-index: 3;
+  color: #ececea;
+  font: 12px var(--font-ui);
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.root-tag--on {
+  visibility: visible;
+  pointer-events: auto;
+  animation: tag-flick-in 0.8s steps(1, end) both;
+}
+
+.root-tag--off {
+  visibility: visible;
+  animation: tag-flick-out 0.5s steps(1, end) both;
+}
+
+@keyframes tag-flick-in {
+  0% {
+    opacity: 0;
+    transform: translateX(-4px);
+    filter: brightness(2.6) contrast(1.4);
+  }
+  6% {
+    opacity: 0.85;
+  }
+  11% {
+    opacity: 0;
+  }
+  17% {
+    opacity: 1;
+    transform: translateX(3px);
+  }
+  22% {
+    opacity: 0.1;
+  }
+  30% {
+    opacity: 0.9;
+    transform: translateX(-1px);
+  }
+  35% {
+    opacity: 0.35;
+  }
+  46% {
+    opacity: 1;
+    transform: none;
+    filter: brightness(1.6);
+  }
+  58% {
+    opacity: 0.7;
+  }
+  64%,
+  100% {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+@keyframes tag-flick-out {
+  0% {
+    opacity: 1;
+  }
+  12% {
+    opacity: 0.2;
+    filter: brightness(2.2);
+  }
+  20% {
+    opacity: 1;
+  }
+  30% {
+    opacity: 0;
+  }
+  40% {
+    opacity: 0.8;
+    transform: translateX(3px);
+  }
+  50% {
+    opacity: 0;
+  }
+  62% {
+    opacity: 0.35;
+  }
+  74%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.root-tag__plate {
+  padding: 10px 13px 12px;
+  border-radius: 4px;
+  background: #1d1d1c;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.18);
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
+}
+
+.root-tag__top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font: 7px var(--font-mono);
+  letter-spacing: 0.14em;
+  color: #6f6f6c;
+}
+
+.root-tag__bars,
+.card__bars {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  height: 6px;
+}
+
+.root-tag__bars i,
+.card__bars i {
+  background: #8f8f8c;
+}
+
+.root-tag__sq {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  background: #e8ecf4;
+  vertical-align: -1px;
+}
+
+.root-tag__cls {
+  margin-top: 10px;
+  font: 600 7.5px var(--font-mono);
+  letter-spacing: 0.22em;
+  color: #777;
+}
+
+.root-tag__big {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-top: 2px;
+}
+
+.root-tag__num {
+  font: 300 36px var(--font-ui);
+  color: #cfcfcc;
+}
+
+.root-tag__name {
+  min-width: 0;
+  overflow: hidden;
+  font: 700 36px var(--font-ui);
+  letter-spacing: -0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: text;
+}
+
+.root-tag__input {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid #555;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  text-align: right;
+}
+
+.root-tag__picks {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.root-tag__picks button {
+  max-width: 110px;
+  overflow: hidden;
+  padding: 2px 7px;
+  border: 1px solid #444;
+  background: #1b1b1a;
+  color: #cfcfcc;
+  font: 600 9px var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.root-tag__picks button:hover {
+  border-color: #888;
+}
+
+.root-tag__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 214px;
+  margin-top: 4px;
+}
+
+.root-tag__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 18px;
+  padding: 0 4px 0 9px;
+  background: rgb(0 0 0 / 0.62);
+  font: 600 7.5px var(--font-mono);
+  letter-spacing: 0.16em;
+  color: #bdbdba;
+}
+
+.root-tag__row span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+}
+
+.root-tag__row--act {
+  color: #e2e2df;
+  cursor: pointer;
+}
+
+.root-tag__row--act:hover {
+  background: rgb(0 0 0 / 0.85);
+  color: #fff;
+}
+
+.root-tag__row .card__menu {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 2px;
+  border-radius: 3px;
+}
+
+/* ---------- водопад ---------- */
+
+.drawer {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  width: 280px;
+  height: 360px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: rgb(7 7 7 / 0.95);
+  box-shadow:
+    inset 0 0 0 1px #2c2c2b,
+    0 24px 48px rgb(0 0 0 / 0.6);
+  color: #ececea;
+  font-family: var(--font-ui);
+}
+
+.drawer__head {
+  padding: 11px 14px 9px;
+  border-bottom: 1px solid #1f1f1e;
+}
+
+.drawer__head b {
+  display: block;
+  font: 700 14px var(--font-ui);
+}
+
+.drawer__head span {
+  font: 10px var(--font-mono);
+  color: #777;
+}
+
+.drawer__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 36px 8px;
+  perspective: 520px;
+  scrollbar-width: thin;
+  scrollbar-color: #333 transparent;
+  mask-image: linear-gradient(transparent, #000 16%, #000 84%, transparent);
+}
+
+.drawer__sep {
+  margin: 10px 8px 4px;
+  font: 600 9px var(--font-mono);
+  letter-spacing: 0.18em;
+  color: #5f5f5d;
+}
+
+.drawer__row {
+  display: block;
+  width: 100%;
+  height: 26px;
+  transform-origin: 50% 50%;
+  animation: drawer-flow linear both;
+  animation-timeline: view();
+  animation-range: cover 0% cover 100%;
+}
+
+.drawer__row > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #cfcfcd;
+  animation: drawer-drop 0.42s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: calc(var(--i) * 16ms);
+}
+
+.drawer__row:hover > div {
+  background: #1d1d1c;
+  color: #fff;
+}
+
+.drawer__open {
+  all: unset;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 100%;
+  cursor: pointer;
+}
+
+/* Значки "скрыть" и "вернуть": у строки по наведению, на месте давности. */
+.drawer__hide {
+  all: unset;
+  display: none;
+  padding: 2px 4px;
+  border-radius: 4px;
+  color: #8a8a87;
+  cursor: pointer;
+  --icon-size: 12px;
+}
+
+.drawer__row:hover .drawer__hide,
+.drawer__hide--back {
+  display: flex;
+}
+
+.drawer__row:hover .drawer__age {
+  display: none;
+}
+
+.drawer__hide:hover {
+  background: #2a2a28;
+  color: #fff;
+}
+
+.drawer__row--hidden .drawer__name {
+  color: #5f5f5d;
+}
+
+.drawer__row svg {
+  flex: none;
+}
+
+.drawer__name {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.drawer__age {
+  font: 10px var(--font-mono);
+  color: #5f5f5d;
+}
+
+.drawer__row--top .drawer__name::after {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-left: 6px;
+  border-radius: 1px;
+  background: #f5d90a;
+  vertical-align: middle;
+}
+
+@keyframes drawer-flow {
+  0% {
+    opacity: 0;
+    transform: rotateX(68deg) translateY(16px) scale(0.86);
+  }
+  14%,
+  86% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+    transform: rotateX(-68deg) translateY(-16px) scale(0.86);
+  }
+}
+
+@keyframes drawer-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-18px);
+  }
+}
+
+/* ---------- плита "керамика Atlas" ---------- */
+
+.react-flow__node:has(> .card--atlas) {
+  border-radius: 4px;
+}
+
+.card--atlas,
+.card--atlas.card--flat {
+  padding: 0 7px 7px;
+  border: 0;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #31312f, #1f1f1e 50%, #121211);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.22),
+    0 18px 34px -16px rgb(0 0 0 / 0.85),
+    0 2px 8px rgb(0 0 0 / 0.35);
+}
+
+
+/* Экран - тёмная линза с почти прямыми углами. */
+.card--atlas .card__front,
+.card--atlas.card--flat > .card__body {
+  border: 1.5px solid #000;
+  border-radius: 2px;
+  background: radial-gradient(#1c1c1b, #050505);
+  overflow: hidden;
+}
+
+/* Шапка в две строки: сверху штрихкод с меткой, ниже имя крупно. */
+.card__bar--atlas,
+.card--flat .card__bar--atlas {
+  height: 43px;
+  padding: 16px 0 0 5px;
+}
+
+.card--folded .card__bar--atlas {
+  height: 36px;
+  padding-top: 12px;
+}
+
+.card__bar--atlas .card__dot {
+  display: none;
+}
+
+.card__bar--atlas .card__title {
+  font: 700 15px var(--font-ui);
+  letter-spacing: -0.01em;
+  color: #ececea;
+}
+
+.card__tag {
+  position: absolute;
+  top: 8px;
+  left: 5px;
+  right: 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 7px;
+  overflow: hidden;
+  font: 7px var(--font-mono);
+  letter-spacing: 0.14em;
+  color: #7a7a77;
+  white-space: nowrap;
+}
+
+.card--folded .card__tag {
+  top: 4px;
+}
+
+.card__tag-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card__where {
+  font-weight: 400;
+  color: #bdbdba;
+}
+
+.card__where--copy {
+  color: var(--attention);
+}
+
+
+@media (prefers-reduced-motion: reduce) {
+  .card__proj {
+    animation: none;
+  }
+}
+
+/* Квадрат цвета проекта: по нему карточку относят к проекту, не читая метки. */
+.card__sq {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  background: var(--pc);
+}
+
+/* Свет работающего агента - от места входа связи, дышит; маяк ждущего - янтарём в такт вспышке связи (ring-fx.ts). */
+.card__glow {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: inherit;
+  background: radial-gradient(
+    circle var(--glow-r, 160px) at var(--port-x) var(--port-y),
+    color-mix(in srgb, var(--pc) 55%, transparent),
+    transparent
+  );
+  pointer-events: none;
+  will-change: opacity;
+  animation: atlas-breathe 2.4s ease-in-out infinite;
+}
+
+/* Маяк мигает анимацией из скрипта по часам страницы (Card.tsx, AtlasGlow). */
+.card__glow--wait {
+  --pc: var(--attention);
+  animation: none;
+}
+
+@keyframes atlas-breathe {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Ореол фокуса лежит на узле (index.css), а сворачивается карточка внутри него: пока она появляется и уходит, ореола
+   нет, иначе он висел бы во весь размер. */
+.react-flow .react-flow__node:has(> .card--atlas.card--born),
+.react-flow .react-flow__node:has(> .card--atlas.card--dying) {
+  box-shadow: none;
+}
+
+/* Из связи: от места входа по грани разбегается светлая черта, из неё раскрывается карточка. */
+.card--atlas.card--born,
+.card--atlas.card--dying {
+  transform-origin: var(--port-x, 50%) var(--port-y, 0);
+  animation: atlas-born-y 0.76s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* card-in (index.css) остаётся в списке с нулевой длительностью: снятый с карточки card--born иначе вернул бы его
+   новой анимацией, и готовая карточка мигнула бы ещё раз. */
+.card--atlas.card--born {
+  animation:
+    card-in 0s backwards,
+    atlas-born-y 0.76s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.card--atlas.card--born.card--port-x {
+  animation-name: card-in, atlas-born-x;
+}
+
+.card--atlas.card--dying {
+  animation-duration: 0.44s;
+  animation-timing-function: cubic-bezier(0.6, 0, 0.8, 0.3);
+  animation-direction: reverse;
+  pointer-events: none;
+}
+
+.card--atlas.card--dying.card--port-x {
+  animation-name: atlas-born-x;
+}
+
+.card--atlas.card--born > *,
+.card--atlas.card--dying > * {
+  animation: atlas-show 0.76s both;
+}
+
+.card--atlas.card--dying > * {
+  animation-duration: 0.44s;
+  animation-direction: reverse;
+}
+
+.card--atlas.card--born::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 11;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1.5px #f3f3f1;
+  pointer-events: none;
+  animation: atlas-flash 0.76s both;
+}
+
+@keyframes atlas-born-y {
+  0% {
+    transform: scale(0.001, 0.012);
+  }
+  35% {
+    transform: scale(1, 0.012);
+  }
+  75%,
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes atlas-born-x {
+  0% {
+    transform: scale(0.012, 0.001);
+  }
+  35% {
+    transform: scale(0.012, 1);
+  }
+  75%,
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes atlas-show {
+  0%,
+  55% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes atlas-flash {
+  0%,
+  60% {
+    opacity: 1;
+  }
+  90%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Окно не в фокусе: повторяющееся движение круглого полотна встаёт, как остальное (index.css, .window-away). */
+.window-away .ring__deco-a,
+.window-away .ring__deco-b,
+.window-away .card__glow {
+  animation-play-state: paused;
+}
