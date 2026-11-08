@@ -2,6 +2,8 @@
 
 [Русский](#русский) | [English](#english)
 
+[![Hyperloom Community: 26 s demo](media/demo.jpg)](media/demo.mp4)
+
 ## Русский
 
 Десктопное приложение для Windows с бесконечным полотном, где каждое рабочее окно - карточка:
